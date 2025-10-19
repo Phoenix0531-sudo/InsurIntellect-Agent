@@ -380,7 +380,9 @@ function escapeHtml(text) {
 
 // 滚动到底部
 function scrollToBottom() {
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    setTimeout(() => {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }, 100);
 }
 
 // 设置加载状态

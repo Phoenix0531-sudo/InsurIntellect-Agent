@@ -381,11 +381,13 @@ function addMessageToChat(sender, content, isError = false, messageType = 'norma
 // 滚动到底部
 function scrollToBottom() {
     if (elements.chatMessages) {
-        const scrollOptions = {
-            top: elements.chatMessages.scrollHeight,
-            behavior: 'smooth'
-        };
-        elements.chatMessages.scrollTo(scrollOptions);
+        setTimeout(() => {
+            const scrollOptions = {
+                top: elements.chatMessages.scrollHeight,
+                behavior: 'smooth'
+            };
+            elements.chatMessages.scrollTo(scrollOptions);
+        }, 100);
     }
 }
 

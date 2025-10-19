@@ -784,11 +784,14 @@ body {
 /* 聊天消息区域 */
 .chat-messages {
     flex: 1;
-    overflow-y: auto;
-    padding: var(--spacing-lg);
+    overflow-y: scroll;
+    padding: var(--spacing-md) var(--spacing-lg);
     display: flex;
     flex-direction: column;
     gap: var(--spacing-lg);
+    padding-bottom: 120px; /* 为固定定位的输入框预留空间 */
+    max-height: calc(100vh - 200px); /* 使用max-height而不是height */
+    min-height: 400px; /* 设置最小高度 */
 }
 
 .welcome-section {
