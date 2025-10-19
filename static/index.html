@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InsurIntellect Agent - 智能保险助手</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        gray: {
+                            50: '#f9f9f9',
+                            100: '#ececec',
+                            200: '#e3e3e3',
+                            300: '#cdcdcd',
+                            400: '#b4b4b4',
+                            500: '#9b9b9b',
+                            600: '#676767',
+                            700: '#4e4e4e',
+                            800: '#333333',
+                            850: '#262626',
+                            900: '#171717',
+                            950: '#0d0d0d'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- 桌面端样式 -->
+    <style>
+        /* 侧边栏折叠样式 */
+        #sidebar.collapsed {
+            width: 60px;
+        }
+        
+        #sidebar.collapsed .sidebar-text {
+            display: none;
+        }
+        
+        #sidebar.collapsed .sidebar-content {
+            padding: 0.5rem;
+        }
+    </style>
+</head>
+<body class="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans antialiased">
+    <div class="flex h-screen overflow-hidden">
+        <!-- 侧边栏 -->
+        <div id="sidebar" class="w-80 bg-gray-50 dark:bg-gray-850 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-300 ease-in-out">
+            <div class="flex flex-col h-full">
+                <!-- 侧边栏头部 -->
+                <div class="flex-shrink-0 p-4 border-b border-gray-200 dark:border-gray-700">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center space-x-3 sidebar-content">
+                            <div class="w-8 h-8 bg-gradient-to-br from-gray-600 to-gray-800 rounded-lg flex items-center justify-center shadow-sm">
+                                <i class="fas fa-user-shield text-white text-sm"></i>
+                            </div>
+                            <div class="sidebar-text">
+                                <span class="text-lg font-semibold text-gray-900 dark:text-white">InsurIntellect</span>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">智能保险助手</p>
+                            </div>
+                        </div>
+                        <button class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group" onclick="toggleSidebar()">
+                            <i class="fas fa-bars text-gray-500 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-white transition-colors"></i>
+                        </button>
+                    </div>
+                    <button class="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl sidebar-content" onclick="startNewChat()">
+                        <i class="fas fa-plus text-sm"></i>
+                        <span class="font-medium sidebar-text">新建对话</span>
+                    </button>
+                </div>
+
+                <!-- 快速功能 -->
+                <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 sidebar-content">
+                    <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 sidebar-text">快速功能</h3>
+                    <div class="space-y-1">
+                        <button onclick="sendPrompt('帮我分析一下重疾险')" class="w-full text-left p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center space-x-3 group">
+                            <div class="w-6 h-6 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
+                            <i class="fas fa-heartbeat text-gray-600 dark:text-gray-300 text-xs"></i>
+                            </div>
+                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">重疾险分析</span>
+                        </button>
+                        <button onclick="sendPrompt('医疗险产品对比')" class="w-full text-left p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center space-x-3 group">
+                            <div class="w-6 h-6 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
+                            <i class="fas fa-hospital text-gray-600 dark:text-gray-300 text-xs"></i>
+                            </div>
+                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">医疗险对比</span>
+                        </button>
+                        <button onclick="sendPrompt('保险理赔流程指导')" class="w-full text-left p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center space-x-3 group">
+                            <div class="w-6 h-6 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
+                            <i class="fas fa-file-alt text-gray-600 dark:text-gray-300 text-xs"></i>
+                            </div>
+                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">理赔指导</span>
+                        </button>
+                        <button onclick="sendPrompt('保险配置建议')" class="w-full text-left p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center space-x-3 group">
+                            <div class="w-6 h-6 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
+                            <i class="fas fa-lightbulb text-gray-600 dark:text-gray-300 text-xs"></i>
+                            </div>
+                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">配置建议</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 聊天历史区域 -->
+                <div class="flex-1 overflow-y-auto">
+                    <div class="px-4 py-3 sidebar-content">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider sidebar-text">聊天历史</h3>
+                            <button class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors" onclick="clearChatHistory()" title="清空历史">
+                                <i class="fas fa-trash-alt text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"></i>
+                            </button>
+                        </div>
+                        <div class="chat-history-list space-y-1" id="chatHistoryList">
+                            <!-- 聊天历史项目将在这里动态添加 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 侧边栏底部 -->
+                <div class="flex-shrink-0 p-4 border-t border-gray-200 dark:border-gray-700 sidebar-content">
+                    <div class="space-y-1 mb-4">
+                        <button class="w-full flex items-center space-x-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group" onclick="exportChat()">
+                            <i class="fas fa-download text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors"></i>
+                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">导出对话</span>
+                        </button>
+                        <button class="w-full flex items-center space-x-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group" onclick="shareChat()">
+                            <i class="fas fa-share-alt text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors"></i>
+                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">分享对话</span>
+                        </button>
+                        <button class="w-full flex items-center space-x-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group" onclick="openSettings()">
+                            <i class="fas fa-cog text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors"></i>
+                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">设置</span>
+                        </button>
+                    </div>
+                    
+                    <!-- 系统状态 -->
+                    <div class="space-y-3">
+                        <div class="flex items-center space-x-3 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div class="w-2 h-2 bg-green-500 rounded-full status-indicator online"></div>
+                            <div class="flex-1 sidebar-text">
+                                <div class="text-sm font-medium text-gray-900 dark:text-white status-text">系统在线</div>
+                                <div id="model-status" class="text-xs text-gray-500 dark:text-gray-400">正在连接...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主内容区域 -->
+        <div class="flex-1 flex flex-col">
+            <!-- 顶部栏 -->
+            <div class="bg-gray-50 dark:bg-gray-850 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between">
+                <h2 class="text-lg font-medium text-gray-900 dark:text-white">InsurIntellect</h2>
+                <div class="flex items-center space-x-2">
+                    <button onclick="exportChat()" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors" title="导出对话">
+                        <i class="fas fa-download text-gray-600 dark:text-gray-400"></i>
+                    </button>
+                    <button onclick="toggleTheme()" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors" title="切换主题">
+                        <i class="fas fa-moon text-gray-600 dark:text-gray-400" id="themeIcon"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 聊天视图 -->
+            <div class="flex-1 flex flex-col" id="chatView">
+
+                <!-- 聊天消息区域 -->
+                <div class="flex-1 overflow-y-auto px-6 py-4" id="chatMessages">
+                    <!-- 欢迎区域 -->
+                    <div class="max-w-3xl mx-auto typography-premium animate-fade-in" id="welcomeSection">
+                        <div class="text-center mb-12">
+                            <div class="w-20 h-20 premium-gradient rounded-2xl flex items-center justify-center mx-auto mb-6 border border-gray-200 dark:border-gray-700">
+                                <i class="fas fa-shield-alt text-gray-700 dark:text-gray-300 text-2xl"></i>
+                            </div>
+                            <h1 class="text-3xl font-semibold text-gray-900 dark:text-white mb-3 tracking-tight">InsurIntellect</h1>
+                            <p class="text-gray-600 dark:text-gray-400 text-lg leading-relaxed max-w-xl mx-auto">
+                                专业的智能保险顾问，为您提供精准的保险分析与建议
+                            </p>
+                        </div>
+
+                        <div class="divider-elegant mb-8"></div>
+
+                        <!-- 建议提示 -->
+                        <div class="space-y-4 animate-slide-up">
+                            <h2 class="text-xl font-medium text-gray-900 dark:text-white text-center mb-6">开始对话</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl mx-auto">
+                                <button class="btn-professional text-left" onclick="sendPrompt('帮我分析一下重疾险的保障范围和理赔条件')">
+                                    <div class="flex items-center space-x-3">
+                                        <i class="fas fa-heartbeat text-gray-500 dark:text-gray-400"></i>
+                                        <span>重疾险分析</span>
+                                    </div>
+                                </button>
+                                <button class="btn-professional text-left" onclick="sendPrompt('我想了解意外险的保障内容')">
+                                    <div class="flex items-center space-x-3">
+                                        <i class="fas fa-shield-alt text-gray-500 dark:text-gray-400"></i>
+                                        <span>意外险咨询</span>
+                                    </div>
+                                </button>
+                                <button class="btn-professional text-left" onclick="sendPrompt('我想了解不同年龄段应该如何配置保险')">
+                                    <div class="flex items-center space-x-3">
+                                        <i class="fas fa-users text-gray-500 dark:text-gray-400"></i>
+                                        <span>保险配置建议</span>
+                                    </div>
+                                </button>
+                                <button class="btn-professional text-left" onclick="sendPrompt('请帮我比较几款热门的医疗险产品')">
+                                    <div class="flex items-center space-x-3">
+                                        <i class="fas fa-hospital text-gray-500 dark:text-gray-400"></i>
+                                        <span>医疗险对比</span>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 聊天输入区域 -->
+                <div class="input-container">
+                    <div class="input-wrapper">
+                        <textarea 
+                            id="chat-input" 
+                            placeholder="输入您的问题..."
+                            rows="1"
+                            class="chat-input"
+                            onkeydown="handleKeyDown(event)"
+                            oninput="autoResize(this)"
+                        ></textarea>
+                        <button class="send-button" onclick="sendMessage()" id="sendButton" disabled>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M7 11L12 6L17 11M12 18V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+        </div>
+    </div>
+
+    <!-- 加载遮罩 -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">正在处理您的请求...</div>
+        </div>
+    </div>
+
+    <!-- 文件输入 -->
+    <input type="file" id="fileInput" multiple accept=".pdf,.doc,.docx,.txt,.jpg,.png" class="hidden">
+
+    <!-- JavaScript -->
+    <script src="/static/js/app.js"></script>
+    <script>
+        // 初始化应用
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeApp();
+        });
+
+        // 切换侧边栏
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const sidebarContainer = sidebar.querySelector('.sidebar-container');
+            const sidebarContent = sidebar.querySelectorAll('.sidebar-content');
+            const sidebarText = sidebar.querySelectorAll('.sidebar-text');
+            
+            if (sidebar.classList.contains('w-80')) {
+                // 收缩侧边栏
+                sidebar.classList.remove('w-80');
+                sidebar.classList.add('w-16');
+                
+                // 隐藏文本内容
+                sidebarContent.forEach(el => el.classList.add('hidden'));
+                sidebarText.forEach(el => el.classList.add('hidden'));
+                
+                // 调整按钮样式
+                const newChatBtn = sidebar.querySelector('button[onclick="startNewChat()"]');
+                if (newChatBtn) {
+                    newChatBtn.innerHTML = '<i class="fas fa-plus"></i>';
+                    newChatBtn.classList.add('w-10', 'h-10', 'p-0');
+                    newChatBtn.classList.remove('px-4', 'py-3');
+                }
+            } else {
+                // 展开侧边栏
+                sidebar.classList.remove('w-16');
+                sidebar.classList.add('w-80');
+                
+                // 显示文本内容
+                sidebarContent.forEach(el => el.classList.remove('hidden'));
+                sidebarText.forEach(el => el.classList.remove('hidden'));
+                
+                // 恢复按钮样式
+                const newChatBtn = sidebar.querySelector('button[onclick="startNewChat()"]');
+                if (newChatBtn) {
+                    newChatBtn.innerHTML = '<i class="fas fa-plus text-sm"></i><span class="font-medium sidebar-text">新建对话</span>';
+                    newChatBtn.classList.remove('w-10', 'h-10', 'p-0');
+                    newChatBtn.classList.add('px-4', 'py-3');
+                }
+            }
+        }
+
+        // 切换侧边栏
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('collapsed');
+        }
+
+        // 开始新对话
+        function startNewChat() {
+            clearChatMessages();
+            showWelcomeSection();
+        }
+
+        // 清空聊天消息
+        function clearChatMessages() {
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.innerHTML = '';
+        }
+
+        // 显示欢迎区域
+        function showWelcomeSection() {
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.innerHTML = `
+                <div class="max-w-4xl mx-auto" id="welcomeSection">
+                    <div class="text-center mb-12">
+                        <h1 class="text-3xl font-light text-gray-900 dark:text-white mb-3">InsurIntellect</h1>
+                        <p class="text-gray-600 dark:text-gray-400 text-lg font-light">
+                            智能保险助手
+                        </p>
+                    </div>
+
+                    <!-- 建议提示 -->
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <button class="text-left p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all" onclick="sendPrompt('帮我分析一下重疾险的保障范围和理赔条件')">
+                                <div class="font-medium text-gray-900 dark:text-white mb-2">重疾险分析</div>
+                                <div class="text-sm text-gray-500 dark:text-gray-400">了解重疾险的保障范围和理赔条件</div>
+                            </button>
+                            <button class="text-left p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all" onclick="sendPrompt('我想了解不同年龄段应该如何配置保险')">
+                                <div class="font-medium text-gray-900 dark:text-white mb-2">保险配置建议</div>
+                                <div class="text-sm text-gray-500 dark:text-gray-400">根据年龄段提供个性化保险配置方案</div>
+                            </button>
+                            <button class="text-left p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all" onclick="sendPrompt('请帮我比较几款热门的医疗险产品')">
+                                <div class="font-medium text-gray-900 dark:text-white mb-2">医疗险对比</div>
+                                <div class="text-sm text-gray-500 dark:text-gray-400">对比分析不同医疗险产品的优势</div>
+                            </button>
+                            <button class="text-left p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all" onclick="sendPrompt('详细了解保险理赔流程和所需材料')">
+                                <div class="font-medium text-gray-900 dark:text-white mb-2">理赔指导</div>
+                                <div class="text-sm text-gray-500 dark:text-gray-400">详细了解保险理赔流程和所需材料</div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 发送建议提示
+        function sendPrompt(message) {
+            const input = document.getElementById('chat-input');
+            input.value = message;
+            sendMessage();
+        }
+
+        // 切换文件上传
+        function toggleFileUpload() {
+            const fileUploadArea = document.getElementById('fileUploadArea');
+            fileUploadArea.classList.toggle('hidden');
+        }
+
+        // 切换语音输入
+        function toggleVoiceInput() {
+            // 语音输入功能待实现
+            console.log('语音输入功能待实现');
+        }
+
+        // 导出对话
+        function exportChat() {
+            // 导出功能待实现
+            console.log('导出对话功能待实现');
+        }
+
+        // 分享对话
+        function shareChat() {
+            // 分享功能待实现
+            console.log('分享对话功能待实现');
+        }
+
+        // 打开设置
+        function openSettings() {
+            // 设置功能待实现
+            console.log('设置功能待实现');
+        }
+
+        // 清空聊天历史
+        function clearChatHistory() {
+            const historyList = document.getElementById('chatHistoryList');
+            historyList.innerHTML = '';
+        }
+
+        // 处理键盘输入
+        function handleKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        // 调整文本框高度
+        function adjustTextareaHeight(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+        }
+
+        // 更新字符计数
+        function updateCharCounter() {
+            const input = document.getElementById('chat-input');
+            const charCount = document.getElementById('charCount');
+            const sendButton = document.getElementById('sendButton');
+            
+            // 检查元素是否存在，避免null错误
+            if (charCount) {
+                charCount.textContent = input.value.length;
+            }
+            if (sendButton) {
+                sendButton.disabled = input.value.trim().length === 0;
+            }
+        }
+
+        // 发送消息
+        function sendMessage() {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            // 隐藏欢迎区域
+            const welcomeSection = document.getElementById('welcomeSection');
+            if (welcomeSection) {
+                welcomeSection.style.display = 'none';
+            }
+            
+            // 添加用户消息到聊天区域
+            addMessageToChat('user', message);
+            
+            // 清空输入框
+            input.value = '';
+            updateCharCounter();
+            adjustTextareaHeight(input);
+            
+            // 发送到后端
+            sendToBackend(message);
+        }
+
+        // 添加消息到聊天区域
+        function addMessageToChat(sender, message) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `max-w-4xl mx-auto mb-6`;
+            
+            if (sender === 'user') {
+                messageDiv.innerHTML = `
+                    <div class="flex justify-end">
+                        <div class="max-w-3xl bg-gray-600 text-white rounded-2xl px-4 py-3">
+                            <p class="whitespace-pre-wrap">${message}</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                messageDiv.innerHTML = `
+                    <div class="flex items-start space-x-3">
+                        <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <i class="fas fa-robot text-white text-sm"></i>
+                        </div>
+                        <div class="flex-1 bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 border border-gray-200 dark:border-gray-700">
+                            <p class="whitespace-pre-wrap text-gray-900 dark:text-white">${message}</p>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // 发送到后端
+        async function sendToBackend(message) {
+            try {
+                const response = await fetch('/api/v1/queries/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        question: message,
+                        query_type: 'general'
+                    })
+                });
+                
+                const data = await response.json();
+                addMessageToChat('assistant', data.answer);
+            } catch (error) {
+                console.error('Error:', error);
+                addMessageToChat('assistant', '抱歉，发生了错误，请稍后再试。');
+            }
+        }
+
+        // 更新字符计数器
+        function updateCharCounter() {
+            const input = document.getElementById('chat-input');
+            const counter = document.getElementById('char-counter');
+            if (input && counter) {
+                const currentLength = input.value.length;
+                const maxLength = 2000;
+                counter.textContent = `${currentLength}/${maxLength}`;
+                
+                if (currentLength > maxLength * 0.9) {
+                    counter.classList.add('text-red-500');
+                    counter.classList.remove('text-gray-500');
+                } else {
+                    counter.classList.add('text-gray-500');
+                    counter.classList.remove('text-red-500');
+                }
+            }
+        }
+    </script>
+</body>
+</html>
