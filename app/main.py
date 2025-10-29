@@ -57,6 +57,36 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize database: {e}")
         raise
     
+    # 初始化应用状态
+    from app.core.database import db_manager
+    from app.services.vector_store import VectorStoreService
+    from app.services.llm_service import LLMService
+    
+    # 设置数据库管理器
+    app.state.db_manager = db_manager
+    logger.info("Database manager initialized in app state")
+    
+    # 初始化向量服务
+    try:
+        vector_service = VectorStoreService()
+        await vector_service.initialize()
+        app.state.vector_service = vector_service
+        logger.info("Vector service initialized in app state")
+    except Exception as e:
+        logger.error(f"Failed to initialize vector service: {e}")
+        # 设置一个空的向量服务以避免属性错误
+        app.state.vector_service = None
+    
+    # 初始化LLM服务
+    try:
+        llm_service = LLMService()
+        app.state.llm_service = llm_service
+        logger.info("LLM service initialized in app state")
+    except Exception as e:
+        logger.error(f"Failed to initialize LLM service: {e}")
+        # 设置一个空的LLM服务以避免属性错误
+        app.state.llm_service = None
+    
     logger.info("InsurIntellect Agent started successfully")
     
     yield

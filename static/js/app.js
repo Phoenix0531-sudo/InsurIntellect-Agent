@@ -38,7 +38,7 @@ function testAllFunctions() {
     console.log('消息输入 - 可用');
     console.log('发送按钮 - 可用');
     console.log('语音输入 - 可用');
-    console.log('文件上传 - 可用');
+    // 文件上传功能已移除
     
     console.log('所有功能测试完成！');
 }
@@ -69,6 +69,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
     setupEventListeners();
     loadChatHistory();
+    // 文件拖拽功能已移除
     
     // 监听输入变化以启用/禁用发送按钮
     if (chatInput && sendButton) {
@@ -125,8 +126,7 @@ function setupEventListeners() {
         });
     });
     
-    // 文件拖拽事件
-    setupFileDragAndDrop();
+    // 文件拖拽功能已移除
 }
 
 // 处理键盘事件
@@ -458,69 +458,11 @@ function showToast(message, type = 'info') {
 }
 
 // 文件上传相关
-function toggleFileUpload() {
-    const fileUploadArea = document.getElementById('fileUploadArea');
-    if (fileUploadArea.style.display === 'none') {
-        fileUploadArea.style.display = 'block';
-    } else {
-        fileUploadArea.style.display = 'none';
-    }
-}
-
-// 设置文件拖拽
-function setupFileDragAndDrop() {
-    const fileUploadArea = document.getElementById('fileUploadArea');
-    
-    // 检查元素是否存在
-    if (!fileUploadArea) {
-        console.log('文件上传区域不存在，跳过拖拽设置');
-        return;
-    }
-    
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        fileUploadArea.addEventListener(eventName, preventDefaults, false);
-    });
-    
-    function preventDefaults(e) {
-        e.preventDefault();
-        e.stopPropagation();
-    }
-    
-    ['dragenter', 'dragover'].forEach(eventName => {
-        fileUploadArea.addEventListener(eventName, highlight, false);
-    });
-    
-    ['dragleave', 'drop'].forEach(eventName => {
-        fileUploadArea.addEventListener(eventName, unhighlight, false);
-    });
-    
-    function highlight(e) {
-        fileUploadArea.classList.add('highlight');
-    }
-    
-    function unhighlight(e) {
-        fileUploadArea.classList.remove('highlight');
-    }
-    
-    fileUploadArea.addEventListener('drop', handleDrop, false);
-    
-    function handleDrop(e) {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-        handleFiles(files);
-    }
-}
-
-// 处理文件
-function handleFiles(files) {
-    ([...files]).forEach(uploadFile);
-}
-
-// 上传文件
-function uploadFile(file) {
-    console.log('上传文件:', file.name);
-    showToast(`文件 ${file.name} 上传功能开发中...`);
-}
+// 文件上传相关功能已移除
+// function toggleFileUpload() - 已删除
+// function setupFileDragAndDrop() - 已删除  
+// function handleFiles(files) - 已删除
+// function uploadFile(file) - 已删除
 
 // 语音输入
 function toggleVoiceInput() {

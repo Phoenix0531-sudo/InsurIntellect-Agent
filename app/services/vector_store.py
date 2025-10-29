@@ -271,15 +271,23 @@ class VectorStoreService:
         """获取集合统计信息"""
         try:
             if settings.VECTOR_DB_TYPE.lower() == "chromadb":
+                if self.collection is None:
+                    logger.warning("ChromaDB collection is None")
+                    return {"total_vectors": 0, "type": "chromadb", "error": "collection_not_initialized"}
                 count = self.collection.count()
                 return {"total_vectors": count, "type": "chromadb"}
             elif settings.VECTOR_DB_TYPE.lower() == "pinecone":
+                if self.index is None:
+                    logger.warning("Pinecone index is None")
+                    return {"total_vectors": 0, "type": "pinecone", "error": "index_not_initialized"}
                 stats = self.index.describe_index_stats()
                 return {"total_vectors": stats['total_vector_count'], "type": "pinecone"}
+            else:
+                return {"total_vectors": 0, "type": settings.VECTOR_DB_TYPE, "error": "unsupported_type"}
             
         except Exception as e:
             logger.error(f"获取集合统计信息失败: {e}")
-            return {"total_vectors": 0, "type": settings.VECTOR_DB_TYPE}
+            return {"total_vectors": 0, "type": settings.VECTOR_DB_TYPE, "error": str(e)}
     
     async def close(self):
         """关闭连接"""

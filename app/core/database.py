@@ -70,12 +70,13 @@ class DatabaseManager:
         """关闭数据库会话"""
         session.close()
     
-    async def health_check(self) -> bool:
+    def health_check(self) -> bool:
         """数据库健康检查"""
         try:
             session = self.create_session()
             try:
-                session.execute("SELECT 1")
+                from sqlalchemy import text
+                session.execute(text("SELECT 1"))
                 return True
             finally:
                 session.close()

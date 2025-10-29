@@ -16,10 +16,12 @@ class LLMService:
     """大语言模型服务类"""
     
     def __init__(self):
-        # 初始化OpenAI客户端
+        # 初始化OpenAI客户端，配置超时和重试参数
         self.client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL
+            base_url=settings.OPENAI_BASE_URL,
+            timeout=30.0,  # 30秒超时
+            max_retries=2  # 最多重试2次
         )
         
         self.model = settings.OPENAI_MODEL
@@ -224,11 +226,13 @@ class LLMService:
     async def health_check(self) -> bool:
         """健康检查"""
         try:
+            # 设置较短的超时时间，避免长时间等待
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": "Hello"}],
                 max_tokens=10,
-                temperature=0
+                temperature=0,
+                timeout=10.0  # 10秒超时
             )
             return True
             

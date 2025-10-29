@@ -78,8 +78,8 @@ class InsurIntellectAgent:
             
             # 初始化嵌入模型
             self.embeddings = OpenAIEmbeddings(
-                openai_api_key=settings.OPENAI_API_KEY,
-                openai_api_base=settings.OPENAI_BASE_URL,
+                api_key=settings.OPENAI_API_KEY,
+                base_url=settings.OPENAI_BASE_URL,
                 model=settings.OPENAI_EMBEDDING_MODEL
             )
             logger.info("嵌入模型初始化成功")

@@ -62,6 +62,18 @@ SILICONFLOW_MODEL=Qwen/Qwen2.5-7B-Instruct
 3. 查看硅基流动控制台的使用情况和配额
 4. 检查模型名称是否正确
 
+### 启用本地嵌入（离线备选）
+当外部嵌入服务出现限流或网络问题导致向量库重建失败时，可启用本地嵌入以确保流程顺利完成：
+
+- 前提：`sentence-transformers` 已安装（已在 `requirements.txt` 中）。首次运行会自动下载模型。
+- 启用方式（二选一）：
+  - 设置环境变量：在命令行执行 `set USE_LOCAL_EMBEDDINGS=1`（Windows CMD），随后运行 `python ingest.py`
+  - 或在 `app/core/ingestion_config.yml` 的 `general.embedding_model` 设置为 `local:BAAI/bge-m3`
+- 建议搭配：为降低资源消耗和避免接口超限，可设置较小批量 `set DOC_BATCH_SIZE=16` 或 `8`
+- 如需重建：执行 `set REBUILD_VECTOR_DB=1 && python ingest.py`
+
+说明：本地嵌入与远端模型（例如 `BAAI/bge-m3`）维度一致，检索兼容。首次下载模型可能较慢，请耐心等待。
+
 ## 参考链接
 - [硅基流动官网](https://siliconflow.cn)
 - [硅基流动API文档](https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions)

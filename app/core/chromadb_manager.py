@@ -2,6 +2,7 @@
 """ChromaDB单例管理器"""
 
 import chromadb
+from chromadb.config import Settings as ChromaSettings
 from typing import Optional
 import threading
 from pathlib import Path
@@ -15,7 +16,8 @@ class ChromaDBManager:
     
     _instance: Optional['ChromaDBManager'] = None
     _lock = threading.Lock()
-    _client: Optional[chromadb.PersistentClient] = None
+    # 使用通用 Client 类型，便于通过 Settings 关闭遥测并设置持久化目录
+    _client: Optional[chromadb.Client] = None
     _collection: Optional[chromadb.Collection] = None
     
     def __new__(cls):
@@ -32,7 +34,7 @@ class ChromaDBManager:
         self._initialized = True
         logger.info("初始化ChromaDB管理器")
     
-    def get_client(self) -> chromadb.PersistentClient:
+    def get_client(self) -> chromadb.Client:
         """获取ChromaDB客户端（单例）"""
         if self._client is None:
             with self._lock:
@@ -40,8 +42,14 @@ class ChromaDBManager:
                     chroma_path = Path(settings.CHROMA_PERSIST_DIRECTORY)
                     chroma_path.mkdir(parents=True, exist_ok=True)
                     
-                    logger.info(f"创建ChromaDB客户端，路径: {chroma_path}")
-                    self._client = chromadb.PersistentClient(path=str(chroma_path))
+                    logger.info(f"创建ChromaDB持久化客户端，路径: {chroma_path}（禁用匿名遥测）")
+                    # 使用 PersistentClient 确保数据持久化到磁盘
+                    self._client = chromadb.PersistentClient(
+                        path=str(chroma_path),
+                        settings=ChromaSettings(
+                            anonymized_telemetry=False,
+                        )
+                    )
                     
         return self._client
     
