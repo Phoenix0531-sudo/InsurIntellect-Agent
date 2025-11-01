@@ -1,10 +1,11 @@
-"""
+﻿"""
 InsurIntellect Agent - 主应用入口
 智能保险文档问答系统
 """
 
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,15 +17,19 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.database import init_db
 from app.api.routes import api_router
+from app.core.structured_logger import get_structured_logger
+from app.core.auto_restart import setup_auto_restart
 
+# 设置结构化日志
+structured_logger = get_structured_logger("insurintellect", "logs/app.log")
 
-# 配置日志
+# 配置标准日志
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper()),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("logs/app.log") if Path("logs").exists() else logging.NullHandler()
+        logging.FileHandler("logs/app.log", encoding='utf-8'),
+        logging.StreamHandler()
     ]
 )
 
@@ -34,65 +39,54 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    # 启动时初始化
-    logger.info("Starting InsurIntellect Agent...")
+    # 启动时执行
+    logger.info("InsurIntellect Agent 正在启动...")
+    structured_logger.log_system_event("application_startup", version="1.0.0")
     
     # 创建必要的目录
-    directories = [
-        "data/documents/pdfs",
-        "data/vector_db/chroma", 
-        "data/processed",
-        "data/database",
-        "logs"
-    ]
-    
+    directories = ["logs", "uploads", "temp", "data"]
     for directory in directories:
-        Path(directory).mkdir(parents=True, exist_ok=True)
+        Path(directory).mkdir(exist_ok=True)
+        logger.info(f"确保目录存在: {directory}")
     
     # 初始化数据库
     try:
         await init_db()
-        logger.info("Database initialized successfully")
+        logger.info("数据库初始化完成")
+        structured_logger.info("database_initialized")
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"数据库初始化失败: {e}")
+        structured_logger.log_error(e, {"operation": "database_initialization"})
         raise
     
-    # 初始化应用状态
-    from app.core.database import db_manager
-    from app.services.vector_store import VectorStoreService
-    from app.services.llm_service import LLMService
-    
-    # 设置数据库管理器
-    app.state.db_manager = db_manager
-    logger.info("Database manager initialized in app state")
-    
-    # 初始化向量服务
-    try:
-        vector_service = VectorStoreService()
-        await vector_service.initialize()
-        app.state.vector_service = vector_service
-        logger.info("Vector service initialized in app state")
-    except Exception as e:
-        logger.error(f"Failed to initialize vector service: {e}")
-        # 设置一个空的向量服务以避免属性错误
-        app.state.vector_service = None
-    
-    # 初始化LLM服务
-    try:
-        llm_service = LLMService()
-        app.state.llm_service = llm_service
-        logger.info("LLM service initialized in app state")
-    except Exception as e:
-        logger.error(f"Failed to initialize LLM service: {e}")
-        # 设置一个空的LLM服务以避免属性错误
-        app.state.llm_service = None
-    
-    logger.info("InsurIntellect Agent started successfully")
+    # 设置自动重启监控
+    if settings.ENABLE_AUTO_RESTART:
+        monitor = setup_auto_restart(
+            check_interval=30,
+            max_restart_attempts=3,
+            restart_cooldown=60,
+            log_file="logs/auto_restart.log"
+        )
+        
+        # 添加健康检查
+        def database_health_check():
+            """数据库健康检查"""
+            try:
+                # 这里可以添加实际的数据库连接检查
+                return True
+            except:
+                return False
+        
+        monitor.add_health_check("database", database_health_check)
+        monitor.start_monitoring()
+        logger.info("自动重启监控已启动")
+        structured_logger.info("auto_restart_monitoring_started")
     
     yield
     
-    # 关闭时清理
-    logger.info("Shutting down InsurIntellect Agent...")
+    # 关闭时执行
+    logger.info("InsurIntellect Agent 正在关闭...")
+    structured_logger.log_system_event("application_shutdown")
 
 
 # 创建FastAPI应用实例
@@ -105,6 +99,18 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# 添加请求日志中间件
+@app.middleware("http")
+async def log_requests(request, call_next):
+    """记录所有HTTP请求"""
+    logger.info(f"HTTP请求: {request.method} {request.url}")
+    
+    response = await call_next(request)
+    
+    logger.info(f"HTTP响应: {response.status_code}")
+    
+    return response
+
 # 添加CORS中间件
 app.add_middleware(
     CORSMiddleware,
@@ -113,6 +119,50 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 添加请求日志中间件
+@app.middleware("http")
+async def log_requests_structured(request, call_next):
+    """记录HTTP请求的结构化日志"""
+    from fastapi import Request
+    start_time = time.time()
+    
+    # 记录请求开始
+    structured_logger.debug("request_started", 
+                          method=request.method,
+                          path=request.url.path,
+                          query_params=str(request.query_params),
+                          client_ip=request.client.host if request.client else None)
+    
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        
+        # 记录请求完成
+        structured_logger.log_request(
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            response_time=process_time,
+            client_ip=request.client.host if request.client else None
+        )
+        
+        # 添加响应头
+        response.headers["X-Process-Time"] = str(process_time)
+        return response
+        
+    except Exception as e:
+        process_time = time.time() - start_time
+        
+        # 记录请求错误
+        structured_logger.log_error(e, {
+            "operation": "http_request",
+            "method": request.method,
+            "path": request.url.path,
+            "response_time": process_time
+        })
+        
+        raise
 
 
 # 全局异常处理器
@@ -143,12 +193,28 @@ async def general_exception_handler(request, exc):
     )
 
 
-# 根路径 - 重定向到前端界面
+# 根路由 - 重定向到前端界面
 @app.get("/")
 async def root():
-    """根路径 - 重定向到前端界面"""
+    """根路由 - 重定向到前端界面"""
     from fastapi.responses import FileResponse
-    return FileResponse("static/index.html")
+    import os
+    
+    # 使用绝对路径确保文件能被找到
+    current_dir = Path(__file__).parent.parent  # 获取项目根目录
+    static_path = current_dir / "static" / "index.html"
+    
+    if static_path.exists():
+        return FileResponse(static_path)
+    else:
+        # 如果静态文件不存在,返回简单的API信息
+        return {
+            "name": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "message": "InsurIntellect Agent API is running",
+            "docs": "/docs",
+            "health": "/api/v1/health/"
+        }
 
 # API信息路径
 @app.get("/api")
@@ -167,18 +233,34 @@ async def api_info():
 app.include_router(api_router, prefix="/api/v1")
 
 
-# 静态文件服务（如果需要）
-if Path("static").exists():
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+# 挂载静态文件
+static_dir = Path(__file__).parent.parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 if __name__ == "__main__":
     import uvicorn
+    from app.core.port_manager import PortManager
     
-    uvicorn.run(
-        "app.main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.RELOAD and settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower()
-    )
+    # 使用端口管理器获取可用端口
+    try:
+        port = PortManager.get_port_with_fallback(
+            preferred_port=settings.PORT,
+            fallback_start=8000,
+            max_attempts=10
+        )
+        logger.info(f"服务将在端口 {port} 上启动")
+        
+        uvicorn.run(
+            "app.main:app",
+            host=settings.HOST,
+            port=port,
+            reload=settings.RELOAD and settings.DEBUG,
+            log_level=settings.LOG_LEVEL.lower()
+        )
+    except RuntimeError as e:
+        logger.error(f"无法启动服务: {e}")
+        exit(1)
+
+

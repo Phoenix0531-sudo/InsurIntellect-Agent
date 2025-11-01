@@ -6,10 +6,13 @@ from app.core.config import settings
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from app.core.chromadb_manager import chroma_manager
+from app.core.app_logging import setup_logging, get_logger
+
+logger = get_logger(__name__)
 
 
 def run_verification(question: str, top_k: int = 5) -> Path:
-    # 初始化嵌入与Chroma持久库
+    # 初始化嵌入与 Chroma 持久化
     embeddings = OpenAIEmbeddings(
         api_key=(settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY),
         base_url=(settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL),
@@ -94,9 +97,13 @@ def main():
     parser.add_argument("--k", type=int, default=5, help="返回TopK结果")
     args = parser.parse_args()
 
+    setup_logging(level="INFO")
     out_file = run_verification(args.question, args.k)
+    logger.info(f"检索验证摘要已写入: {out_file}")
     print(str(out_file))
 
 
 if __name__ == "__main__":
     main()
+
+

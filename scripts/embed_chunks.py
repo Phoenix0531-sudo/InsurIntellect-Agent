@@ -1,252 +1,130 @@
-import os
-import json
-import time
-import numpy as np
-from pathlib import Path
-from typing import List, Dict, Any
-from tqdm import tqdm
+#!/usr/bin/env python3
+"""
+将分割后的文档块（JSONL）嵌入到 ChromaDB 集合。
 
-from dotenv import load_dotenv
-from app.core.config import settings
-from app.core.chromadb_manager import chroma_manager
-from langchain_chroma import Chroma
+输入文件为 JSONL，每行一个对象，至少包含：
+- text: 文本内容
+- metadata: 元数据字典（可选）
+- id: 唯一标识（可选，若缺失则自动生成）
+"""
+
+import json
+import uuid
+from pathlib import Path
+from typing import List, Dict
+from app.core.app_logging import setup_logging, get_logger
+
+from tqdm import tqdm
 from langchain_openai import OpenAIEmbeddings
 
-# 简单的本地嵌入实现，避免网络依赖
-class SimpleLocalEmbeddings:
-    """简单的本地嵌入实现，使用TF-IDF向量化"""
-    
-    def __init__(self, model_name="simple-local"):
-        self.model_name = model_name
-        self.vocab = {}
-        self.idf = {}
-        self.dimension = 384  # 固定维度
-        
-    def _tokenize(self, text: str) -> List[str]:
-        """简单的分词"""
-        import re
-        # 简单的中英文分词
-        tokens = re.findall(r'[\w\u4e00-\u9fff]+', text.lower())
-        return tokens
-    
-    def _build_vocab(self, texts: List[str]):
-        """构建词汇表"""
-        word_counts = {}
-        doc_counts = {}
-        
-        for text in texts:
-            tokens = self._tokenize(text)
-            unique_tokens = set(tokens)
-            
-            for token in tokens:
-                word_counts[token] = word_counts.get(token, 0) + 1
-            
-            for token in unique_tokens:
-                doc_counts[token] = doc_counts.get(token, 0) + 1
-        
-        # 选择最常见的词作为词汇表
-        sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
-        self.vocab = {word: idx for idx, (word, _) in enumerate(sorted_words[:self.dimension])}
-        
-        # 计算IDF
-        total_docs = len(texts)
-        for word in self.vocab:
-            self.idf[word] = np.log(total_docs / (doc_counts.get(word, 1) + 1))
-    
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """嵌入文档列表"""
-        if not self.vocab:
-            self._build_vocab(texts)
-        
-        embeddings = []
-        for text in texts:
-            tokens = self._tokenize(text)
-            vector = np.zeros(self.dimension)
-            
-            # TF-IDF向量化
-            token_counts = {}
-            for token in tokens:
-                token_counts[token] = token_counts.get(token, 0) + 1
-            
-            for token, count in token_counts.items():
-                if token in self.vocab:
-                    idx = self.vocab[token]
-                    tf = count / len(tokens) if tokens else 0
-                    idf = self.idf.get(token, 0)
-                    vector[idx] = tf * idf
-            
-            # 归一化
-            norm = np.linalg.norm(vector)
-            if norm > 0:
-                vector = vector / norm
-            
-            embeddings.append(vector.tolist())
-        
-        return embeddings
-    
-    def embed_query(self, text: str) -> List[float]:
-        """嵌入单个查询"""
-        return self.embed_documents([text])[0]
+from app.core.config import settings
+from app.core.chromadb_manager import chroma_manager
+
+logger = get_logger(__name__)
 
 
-def _load_embeddings():
-    """Return an embedding function, defaulting to remote (SiliconFlow via OpenAI API-compatible).
-    Set USE_LOCAL_EMBEDDINGS=1 to use simple local embeddings.
-    """
-    use_local = os.getenv("USE_LOCAL_EMBEDDINGS", "0") == "1"
-
-    if use_local:
-        print("使用简单本地嵌入模型（TF-IDF）...")
-        return SimpleLocalEmbeddings()
-
-    # Remote provider via SiliconFlow-compatible base_url
-    return OpenAIEmbeddings(
-        api_key=settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY,
-        base_url=settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL,
-        model=settings.OPENAI_EMBEDDING_MODEL,
-    )
-
-
-def _init_vectorstore(embeddings, collection_name: str):
-    client = chroma_manager.get_client()
-    return Chroma(
-        client=client,
-        collection_name=collection_name,
-        persist_directory=settings.CHROMA_PERSIST_DIRECTORY,
-        embedding_function=embeddings,
-    )
-
-
-def embed_chunks_from_file(chunks_file: Path, collection_name: str):
-    load_dotenv(override=True)
-    if not chunks_file.exists():
-        raise FileNotFoundError(f"未找到分割产物文件: {chunks_file}")
-
-    # 首先计算总行数用于进度显示
-    total_lines = 0
-    with chunks_file.open("r", encoding="utf-8") as f:
+def _load_jsonl(file_path: Path) -> List[Dict]:
+    """加载 JSONL 文件，跳过损坏行。"""
+    items: List[Dict] = []
+    with file_path.open("r", encoding="utf-8") as f:
         for line in f:
-            if line.strip():
-                total_lines += 1
-    
-    print(f"开始处理 {total_lines} 个文档块...")
-
-    # 可选清库重建
-    if os.getenv("REBUILD_VECTOR_DB", "0") == "1":
-        print("清理现有向量数据库...")
-        pd = Path(settings.CHROMA_PERSIST_DIRECTORY)
-        if pd.exists():
-            for p in pd.glob("**/*"):
-                try:
-                    if p.is_file():
-                        p.unlink()
-                except Exception:
-                    pass
+            line = line.strip()
+            if not line:
+                continue
             try:
-                pd.rmdir()
-            except Exception:
-                pass
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                items.append(obj)
+    return items
 
-    embeddings = _load_embeddings()
-    vs = _init_vectorstore(embeddings, collection_name)
 
-    batch_size = int(os.getenv("DOC_BATCH_SIZE", "32"))
-    texts: List[str] = []
-    metas: List[Dict[str, Any]] = []
-    ids: List[str] = []
-    
-    processed_count = 0
+def embed_chunks_from_file(chunks_file: Path, collection_name: str, batch_size: int = 256) -> None:
+    """将 JSONL 文档块嵌入到指定集合。"""
+    logger.info("=" * 60)
+    logger.info("文档块嵌入到 ChromaDB")
+    logger.info("=" * 60)
+    logger.info(f"输入文件: {chunks_file}")
+    logger.info(f"集合名称: {collection_name}")
+
+    # 初始化嵌入模型（兼容 OpenAI/SiliconFlow 接口）
+    embeddings = OpenAIEmbeddings(
+        api_key=(settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY or ""),
+        base_url=(settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL or ""),
+        model=settings.OPENAI_EMBEDDING_MODEL,
+        timeout=60,
+    )
+
+    # 获取 ChromaDB 集合（单例）
+    client = chroma_manager.get_client()
+    collection = client.get_collection(collection_name)
+
+    # 加载数据
+    items = _load_jsonl(chunks_file)
+    total = len(items)
+    logger.info(f"待处理文档块: {total}")
+    if total == 0:
+        logger.warning("⚠️ 未发现有效文档块，结束。")
+        return
+
+    processed = 0
     batch_count = 0
 
-    def _flush():
-        nonlocal batch_count
-        if not texts:
-            return
-        
-        batch_count += 1
-        print(f"处理批次 {batch_count}，包含 {len(texts)} 个文档块...")
-        
-        # 简单重试策略以应对远端速率限制或瞬时网络问题
-        max_retries = 3
-        delay = 2.0
-        for attempt in range(1, max_retries + 1):
+    with tqdm(total=total, desc="嵌入进度", unit="条") as pbar:
+        for start in range(0, total, batch_size):
+            end = min(start + batch_size, total)
+            batch = items[start:end]
+
+            texts: List[str] = []
+            metadatas: List[Dict] = []
+            ids: List[str] = []
+
+            for obj in batch:
+                txt = obj.get("text", "")
+                meta = obj.get("metadata", {})
+                _id = obj.get("id") or str(uuid.uuid4())
+                texts.append(txt)
+                metadatas.append(meta if isinstance(meta, dict) else {})
+                ids.append(str(_id))
+
+            # 计算嵌入
             try:
-                vs.add_texts(texts=texts, metadatas=metas, ids=ids)
-                print(f"✓ 批次 {batch_count} 成功写入向量数据库")
-                break
+                vectors = embeddings.embed_documents(texts)
             except Exception as e:
-                msg = str(e)
-                print(f"⚠ 批次 {batch_count} 写入失败 (尝试 {attempt}/{max_retries}): {msg}")
-                
-                # 遇到网络连接错误时，尝试切换到本地嵌入模型
-                if "Connection error" in msg or "TLS/SSL" in msg or "EOF" in msg or "proxy" in msg or "network" in msg:
-                    try:
-                        print("检测到网络连接问题，尝试切换到本地嵌入模型...")
-                        fallback = SimpleLocalEmbeddings()
-                        vs._embedding_function = fallback
-                        vs.add_texts(texts=texts, metadatas=metas, ids=ids)
-                        print(f"✓ 批次 {batch_count} 使用本地模型成功写入")
-                        break
-                    except Exception as fallback_e:
-                        print(f"本地模型也失败: {fallback_e}")
-                
-                # 遇到模型上下文限制时，尝试切换到更通用的 bge-m3
-                elif ("512" in msg and "token" in msg) or ("maximum context" in msg and "512" in msg) or "context_length_exceeded" in msg:
-                    try:
-                        print("尝试切换到 bge-m3 模型...")
-                        fallback = OpenAIEmbeddings(
-                            api_key=settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY,
-                            base_url=settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL,
-                            model="BAAI/bge-m3",
-                        )
-                        vs._embedding_function = fallback
-                        vs.add_texts(texts=texts, metadatas=metas, ids=ids)
-                        print(f"✓ 批次 {batch_count} 使用 bge-m3 成功写入")
-                        break
-                    except Exception as fallback_e:
-                        print(f"bge-m3 回退也失败: {fallback_e}")
-                        # 若回退仍失败则继续重试流程
-                        pass
-                if attempt >= max_retries:
-                    raise
-                print(f"等待 {delay:.1f} 秒后重试...")
-                time.sleep(delay)
-                delay *= 2
+                logger.error(f"❌ 批次嵌入失败: {e}")
+                raise
 
-        # 清空缓冲区
-        texts.clear()
-        metas.clear()
-        ids.clear()
+            # 写入集合
+            try:
+                collection.add(
+                    ids=ids,
+                    embeddings=vectors,
+                    metadatas=metadatas,
+                    documents=texts,
+                )
+            except Exception as e:
+                logger.error(f"❌ 批次写入失败: {e}")
+                raise
 
-    # 流式读取 JSONL 并分批写入，使用进度条
-    with chunks_file.open("r", encoding="utf-8") as f:
-        with tqdm(total=total_lines, desc="嵌入文档块", unit="块") as pbar:
-            for line in f:
-                if not line.strip():
-                    continue
-                try:
-                    item = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                
-                texts.append(item.get("text", ""))
-                metas.append(item.get("metadata", {}))
-                ids.append(item.get("id", ""))
-                processed_count += 1
-                pbar.update(1)
-                
-                if len(texts) >= batch_size:
-                    _flush()
+            processed += len(batch)
+            batch_count += 1
+            pbar.update(len(batch))
 
-    _flush()
-    
-    print(f"✓ 完成！共处理 {processed_count} 个文档块，分 {batch_count} 个批次写入向量数据库")
-    print("向量数据库已自动持久化")
+    logger.info("\n结果")
+    logger.info("-" * 60)
+    logger.info(f"✅ 完成！共处理 {processed} 个文档块，分 {batch_count} 个批次写入")
+    logger.info(f"📦 持久化目录: {settings.CHROMA_PERSIST_DIRECTORY}")
 
 
 if __name__ == "__main__":
-    file_path = os.getenv("CHUNKS_FILE", "data/processed/chunks.jsonl")
-    collection = os.getenv("COLLECTION_NAME", "insurance_documents")
-    embed_chunks_from_file(Path(file_path), collection)
-    print(f"已完成嵌入并写库：{file_path} -> 集合 {collection}")
+    import argparse
 
+    parser = argparse.ArgumentParser(description="将分割文档块嵌入到向量数据库")
+    parser.add_argument("chunks_file", type=str, help="JSONL 文档块文件路径")
+    parser.add_argument("collection_name", type=str, help="ChromaDB 集合名称")
+    parser.add_argument("--batch_size", type=int, default=256, help="批量大小")
+    args = parser.parse_args()
+
+    setup_logging(level="INFO")
+    embed_chunks_from_file(Path(args.chunks_file), args.collection_name, batch_size=args.batch_size)

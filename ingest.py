@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 InsurIntellect Agent - Data Ingestion Pipeline
 =============================================
@@ -35,7 +35,7 @@ from langchain.schema import Document
 from app.core.config import settings
 from app.prompts import DIGITAL_ARCHIVIST_PROMPT
 from app.core.chromadb_manager import chroma_manager
-from app.core.logging import get_logger as _get_logger
+from app.core.app_logging import get_logger as _get_logger
 
 # OCR imports
 import fitz  # PyMuPDF
@@ -43,7 +43,7 @@ import pytesseract
 from PIL import Image
 from dotenv import load_dotenv
 
-# 可选 YAML 配置支持
+# 可选YAML 配置支持
 try:
     import yaml  # type: ignore
 except Exception:
@@ -56,12 +56,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 每次写入向量库的文档批大小（SiliconFlow embeddings 最大输入 32 条）
+# 每次写入向量库的文档批大小（SiliconFlow embeddings 最大输入32 条）
 load_dotenv()
 DOC_BATCH_SIZE = int(os.getenv("DOC_BATCH_SIZE", "32"))
 OCR_LANG = os.getenv("OCR_LANG", "chi_sim+eng")  # 默认中英文
 
-# 可选：指定 tesseract 可执行文件路径（Windows 常见安装路径示例）
+# 可选:指定 tesseract 可执行文件路径（Windows 常见安装路径示例）
 _tcmd_env = os.getenv("TESSERACT_CMD")
 if _tcmd_env:
     pytesseract.pytesseract.tesseract_cmd = _tcmd_env
@@ -81,16 +81,16 @@ else:
         except Exception:
             pass
 
-# 版本输出移动到配置加载后，以确保最终路径生效
+# 版本输出移动到配置加载后,以确保最终路径生成
 
 
 def _normalize_text(text: str) -> str:
-    """标准化文本以便简单去重：去除多余空白与控制符。"""
+    """标准化文本以便简单去重:去除多余空白与控制符"""
     return " ".join((text or "").split())
 
 
 def _is_near_duplicate(a: str, b: str, threshold: float) -> bool:
-    """使用序列相似度做近似去重，避免重复块进入向量库。"""
+    """使用序列相似度做近似去重,避免重复块进入向量库"""
     try:
         from difflib import SequenceMatcher
         return SequenceMatcher(None, a, b).ratio() >= threshold
@@ -99,7 +99,7 @@ def _is_near_duplicate(a: str, b: str, threshold: float) -> bool:
 
 
 def _load_ingestion_config() -> Dict[str, Any]:
-    """加载摄取配置。如果 YAML 不可用或文件缺失，则回退到默认配置。"""
+    """加载摄取配置.如果YAML不可用或文件缺失,则回退到默认配置"""
     default_cfg: Dict[str, Any] = {
         "general": {
             "persist_directory": settings.CHROMA_PERSIST_DIRECTORY,
@@ -133,7 +133,7 @@ def _load_ingestion_config() -> Dict[str, Any]:
 
     cfg_path = Path("app/core/ingestion_config.yml")
     if yaml is None or not cfg_path.exists():
-        logger.warning("YAML 不可用或配置文件缺失，使用默认摄取配置")
+        logger.warning("YAML不可用或配置文件缺失,使用默认摄取配置")
         return default_cfg
 
     try:
@@ -149,13 +149,13 @@ def _load_ingestion_config() -> Dict[str, Any]:
                 merged["general"]["ocr"].update(cfg["general"]["ocr"] or {})
         if "sources" in cfg:
             merged["sources"] = cfg["sources"] or default_cfg["sources"]
-        # 应用 tesseract_cmd（若存在），否则保留自动探测/环境变量设置
+        # 应用 tesseract_cmd（若存在）,否则保留自动探测/环境变量设置
         tcmd = merged["general"]["ocr"].get("tesseract_cmd") or ""
         if tcmd:
             pytesseract.pytesseract.tesseract_cmd = tcmd
         return merged
     except Exception as e:
-        logger.error(f"加载摄取配置失败，回退到默认: {e}")
+        logger.error(f"加载摄取配置失败,回退到默认值: {e}")
         return default_cfg
 
 
@@ -171,7 +171,7 @@ def get_metadata_from_ai(text_snippet: str) -> Dict[str, Any]:
     """
     try:
         try:
-            # 尝试动态导入硅基流动 Chat 模型；如不可用则回退
+            # 尝试动态导入硅基流动Chat模型；如不可用则回退
             from langchain_community.chat_models import ChatSiliconFlow  # type: ignore
             chat_model = ChatSiliconFlow(
                 model=settings.OPENAI_MODEL,  # 使用配置中的模型名
@@ -181,7 +181,7 @@ def get_metadata_from_ai(text_snippet: str) -> Dict[str, Any]:
             prompt = DIGITAL_ARCHIVIST_PROMPT.format(
                 document_text_snippet=text_snippet
             )
-            logger.info("正在调用AI提取文档元数据...")
+            logger.info("正在调用AI提取文档元数据..")
             response = chat_model.invoke(prompt)
             try:
                 metadata = json.loads(response.content)
@@ -197,7 +197,7 @@ def get_metadata_from_ai(text_snippet: str) -> Dict[str, Any]:
                     "error": f"JSON解析错误: {str(e)}"
                 }
         except ImportError:
-            logger.warning("ChatSiliconFlow 不可用，使用回退元数据")
+            logger.warning("ChatSiliconFlow不可用,使用回退元数据")
             return {
                 "document_title": "自动生成",
                 "product_name": "未知",
@@ -216,7 +216,7 @@ def get_metadata_from_ai(text_snippet: str) -> Dict[str, Any]:
 
 
 def _build_text_splitter(chunk_cfg: Dict[str, Any]) -> RecursiveCharacterTextSplitter:
-    """按配置构建文本分割器。"""
+    """按配置构建文本分割器"""
     token_based = bool(chunk_cfg.get("token_based", True))
     chunk_size = int(chunk_cfg.get("chunk_size", 256))
     chunk_overlap = int(chunk_cfg.get("chunk_overlap", 32))
@@ -231,7 +231,7 @@ def _build_text_splitter(chunk_cfg: Dict[str, Any]) -> RecursiveCharacterTextSpl
             logger.info(f"使用token分割器: size={chunk_size}, overlap={chunk_overlap}")
             return splitter
         except Exception:
-            logger.info("token分割器不可用，回退字符分割器")
+            logger.info("token分割器不可用,回退字符分割器")
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
@@ -244,7 +244,7 @@ def _build_text_splitter(chunk_cfg: Dict[str, Any]) -> RecursiveCharacterTextSpl
 
 def main():
     """
-    主函数：执行数据摄取管道的核心逻辑
+    主函数:执行数据摄取管道的核心逻辑
     """
     logger.info("开始执行数据摄取管道...")
     
@@ -262,7 +262,7 @@ def main():
         _ver = str(get_tesseract_version())
         logger.info(f"检测到Tesseract版本: {_ver}")
     except Exception as _e:
-        logger.warning(f"无法获取Tesseract版本，可能未正确安装或路径不可用: {_e}")
+        logger.warning(f"无法获取Tesseract版本,可能未正确安装或路径不可用: {_e}")
 
     # 向量库目录/集合/嵌入模型/批大小
     vector_store_path = general.get("persist_directory", settings.CHROMA_PERSIST_DIRECTORY)
@@ -276,21 +276,21 @@ def main():
     classification_cfg = cfg.get("classification", {})
     profiles_cfg = cfg.get("profiles", {})
     
-    # 汇总所有待处理文件：按分组读取
+    # 汇总所有待处理文件:按分组读取
     grouped_files: List[Tuple[Dict[str, Any], List[Path]]] = []
     for src in sources:
         src_path = Path(src.get("path", "./data/documents/pdfs"))
         if not src_path.exists():
-            logger.warning(f"数据源目录不存在，跳过: {src_path}")
+            logger.warning(f"数据源目录不存在,跳过 {src_path}")
             continue
         files = [p for p in src_path.rglob("*.pdf") if p.is_file()]
         if not files:
-            logger.warning(f"分组 {src.get('name')} 在 {src_path} 未找到PDF文件")
+            logger.warning(f"分组 {src.get('name')} 在 {src_path} 未找到 PDF 文件")
             continue
         logger.info(f"分组 {src.get('name')} 找到 {len(files)} 个PDF文件")
         grouped_files.append((src, files))
     if not grouped_files:
-        logger.error("未找到任何待处理PDF文件。请检查 ingestion_config.yml 的路径设置。")
+        logger.error("未找到任何待处理PDF文件.请检查ingestion_config.yml的路径设置")
         return
     
     # 存储所有处理后的文档块
@@ -308,7 +308,7 @@ def main():
         return img
 
     def extract_text_pages_with_ocr(file_path: Path, force_ocr: bool, ocr_lang: str) -> List[Dict[str, Any]]:
-        """优先使用 pdfplumber/PyPDF2 提取文本；不足时使用 OCR 回退。
+        """优先使用 pdfplumber/PyPDF2 提取文本；不足时回退到 OCR。
         返回每页的 {text, page_number, method} 列表。
         """
         pages: List[Dict[str, Any]] = []
@@ -336,9 +336,9 @@ def main():
                     if txt.strip():
                         pages.append({"text": txt.strip(), "page_number": i, "method": "pdfplumber"})
         except Exception as e:
-            logger.warning(f"pdfplumber 提取失败，转用 PyPDF2: {e}")
+            logger.warning(f"pdfplumber 提取失败,转为 PyPDF2: {e}")
 
-        # 2) 若为空或文本密度过低，尝试 PyPDF2
+        # 2) 若为空或文本密度过低,尝试使用 PyPDF2
         if not pages:
             try:
                 import PyPDF2
@@ -351,8 +351,8 @@ def main():
             except Exception as e:
                 logger.warning(f"PyPDF2 提取失败: {e}")
 
-        # 3) 评估文本密度，若不足则对每页进行 OCR
-        # 简单策略：若前两步总字符数 < 200 或空，则触发 OCR
+        # 3) 评估文本密度,若不足则对每页进行 OCR
+        # 简单策略:若前两步总字符数 < 200 或空,则触发 OCR
         char_count = sum(len(p["text"]) for p in pages)
         need_ocr = (char_count < 200)
         ocr_results: List[Dict[str, Any]] = []
@@ -360,7 +360,7 @@ def main():
             try:
                 doc = fitz.open(str(file_path))
                 for i, page in enumerate(doc, start=1):
-                    # 高分辨率渲染以提高 OCR 准确率
+                    # 高分辨率渲染以提升 OCR 准确度
                     pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
                     img = _page_pixmap_to_image(pix)
                     text = pytesseract.image_to_string(img, lang=ocr_lang)
@@ -376,7 +376,7 @@ def main():
         return pages
 
     def load_documents_from_pdf(pdf_file: Path, force_ocr: bool, ocr_lang: str) -> List[Document]:
-        """使用 OCR 支持的方式加载 PDF 为 LangChain Document 列表（每页一个）。"""
+        """使用 OCR 支持的方式加载 PDF 为 LangChain Document 列表（每页一个）"""
         nonlocal total_pages, ocr_pages
         pages = extract_text_pages_with_ocr(pdf_file, force_ocr=force_ocr, ocr_lang=ocr_lang)
         total_pages += len(pages)
@@ -411,7 +411,7 @@ def main():
 
         text_splitter = _build_text_splitter(chunk_cfg)
 
-        logger.info(f"开始处理分组: {src_name}（默认类型={doc_type}, OCR={'on' if force_ocr else 'auto'}）")
+        logger.info(f"开始处理分组 {src_name}（默认类型:{doc_type}, OCR={'on' if force_ocr else 'auto'}）")
         for pdf_file in pdf_files:
             total_files += 1
             logger.info(f"正在处理文件: {pdf_file.name}")
@@ -447,7 +447,7 @@ def main():
                     selected_chunk_cfg = profiles_cfg.get("tables", {}).get("chunk", selected_chunk_cfg)
                     selected_dedup_cfg = profiles_cfg.get("tables", {}).get("dedup", selected_dedup_cfg)
 
-                # 加载文档页
+                # 加载文档
                 force_ocr_sel = bool(selected_ocr_cfg.get("enabled", False))
                 ocr_lang_sel = str(selected_ocr_cfg.get("lang", general.get("ocr", {}).get("lang", OCR_LANG)))
                 documents = load_documents_from_pdf(pdf_file, force_ocr=force_ocr_sel, ocr_lang=ocr_lang_sel)
@@ -455,7 +455,7 @@ def main():
                     logger.warning(f"文件 {pdf_file.name} 加载失败或为空")
                     continue
 
-                # 取第一页文本作为摘要，用于AI元数据提取
+                # 取第一页文本作为摘要,用于 AI 元数据提取
                 first_page_text = documents[0].page_content[:2000]
                 ai_metadata = get_metadata_from_ai(first_page_text)
 
@@ -505,9 +505,9 @@ def main():
     
     logger.info(f"总共处理了 {len(all_documents)} 个文档块")
     
-    # 仅准备模式：导出分割/去重后的块与元数据为 JSONL
+    # 仅准备模式:导出分割/去重后的块与元数据为 JSONL
     prepare_only = os.getenv("PREPARE_ONLY", "0") == "1"
-    # 兼容命令行参数：--prepare-only 或 --prepare
+    # 兼容命令行参数: --prepare-only 或 --prepare
     if not prepare_only:
         cli_prepare = any(arg in ("--prepare-only", "--prepare") for arg in sys.argv[1:])
         if cli_prepare:
@@ -517,7 +517,7 @@ def main():
         export_path.parent.mkdir(parents=True, exist_ok=True)
         with export_path.open("w", encoding="utf-8") as f:
             for ch in all_documents:
-                # 稳定ID：基于文件路径、页号、规范化文本内容
+                # 稳定ID:基于文件路径,页号,规范化文本内容
                 norm_text = ch.page_content.strip()
                 key = f"{ch.metadata.get('file_path','')}|{ch.metadata.get('page_number','')}|{norm_text}"
                 _id = hashlib.sha1(key.encode("utf-8")).hexdigest()
@@ -527,8 +527,8 @@ def main():
                     "metadata": ch.metadata,
                 }
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-        logger.info(f"已导出分割产物: {export_path}，共 {len(all_documents)} 块")
-        logger.info("准备阶段完成（PREPARE_ONLY=1），未进行嵌入与写库")
+        logger.info(f"已导出分割产物到 {export_path},共 {len(all_documents)} 个文档块")
+        logger.info("准备阶段完成（PREPARE_ONLY=1）,未进行嵌入与写库")
         return
     
     # 初始化嵌入模型（支持远程/本地，且可被配置覆盖）
@@ -540,7 +540,7 @@ def main():
         use_local = use_local_env or use_local_cfg
 
         if use_local:
-            # 解析本地模型名称（形如 local:BAAI/bge-m3 或 hf:BAAI/bge-m3）
+            # 解析本地模型名称（形式: local:BAAI/bge-m3 或 hf:BAAI/bge-m3）
             local_model = model_name_cfg.split(":", 1)[1] if ":" in model_name_cfg else "BAAI/bge-m3"
             logger.info(f"Embeddings provider: local:huggingface, model={local_model}")
             embeddings = HuggingFaceEmbeddings(
@@ -566,7 +566,7 @@ def main():
     rebuild_env = os.getenv("REBUILD_VECTOR_DB", "0") == "1"
     rebuild = rebuild_env or (write_mode == "rebuild")
     if rebuild and vector_store_dir.exists():
-        logger.info(f"检测到 REBUILD_VECTOR_DB=1，正在清理旧向量库: {vector_store_dir}")
+        logger.info(f"检测到 REBUILD_VECTOR_DB=1,正在清理旧向量库 {vector_store_dir}")
         try:
             shutil.rmtree(vector_store_dir)
         except Exception as e:
@@ -575,7 +575,7 @@ def main():
     
     try:
         logger.info("正在创建/打开 ChromaDB 向量数据库...")
-        # 使用单例客户端以统一配置，并禁用匿名遥测
+        # 使用单例客户端以统一配置,并禁用匿名遥测
         chroma_client = chroma_manager.get_client()
         
         # 初始化空的 Chroma 向量库，然后分批写入，避免一次性大批量嵌入导致 400
@@ -594,14 +594,14 @@ def main():
         for start in range(0, total, batch_size):
             end = min(start + batch_size, total)
             batch_docs = all_documents[start:end]
-            logger.info(f"写入批次 {start}-{end}，共 {len(batch_docs)} 块")
+            logger.info(f"写入批次 {start}-{end},共 {len(batch_docs)} 个文档块")
             try:
                 vectorstore.add_documents(batch_docs)
             except Exception as e:
                 msg = str(e)
-                # 针对 BGE 大模型的 512 token 输入限制，切换到 bge-m3 作为兜底
+                # 针对 BGE 大模型的 512 token 输入限制,切换到 bge-m3 作为兜底
                 if ("less than 512 tokens" in msg or "maximum context length" in msg) and not fallback_applied and not use_local:
-                    logger.warning("检测到输入超过 512 tokens，切换到 BAAI/bge-m3 继续写入")
+                    logger.warning("检测到输入超过 512 tokens,切换到 BAAI/bge-m3 继续写入")
                     embeddings = OpenAIEmbeddings(
                         api_key=(settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY),
                         base_url=(settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL),
@@ -616,7 +616,7 @@ def main():
                     )
                     fallback_applied = True
                     vectorstore.add_documents(batch_docs)
-                # 针对外部服务的限流/网络问题，自动回退到本地嵌入一次
+                # 针对外部服务的限制或网络问题，自动回退到本地嵌入以继续
                 elif ("429" in msg or "Too Many Requests" in msg or "timed out" in msg or "Timeout" in msg or "SSL" in msg or "Connection" in msg or "HTTP" in msg) and not local_fallback_applied:
                     logger.warning("检测到外部嵌入服务问题，自动回退到本地 HuggingFace 嵌入继续写入")
                     try:
@@ -636,11 +636,11 @@ def main():
                 else:
                     raise
         
-        # 持久化说明：在指定 persist_directory 时，langchain_chroma 的 Chroma 会自动持久化。
-        # 因此无需显式调用 persist()。
-        logger.info(f"成功创建/更新向量数据库，存储路径: {vector_store_path}")
-        logger.info(f"数据库本次写入 {len(all_documents)} 个文档块，处理 {total_files} 个文件")
-        logger.info(f"文本页总数: {total_pages}，其中 OCR 页数: {ocr_pages}")
+        # 持久化说明: 在指定 persist_directory 时，langchain_chroma 的 Chroma 会自动持久化
+        # 因此无需显式调用 persist()
+        logger.info(f"成功创建/更新向量数据库,存储路径: {vector_store_path}")
+        logger.info(f"数据库本次写入 {len(all_documents)} 个文档块,处理 {total_files} 个文件")
+        logger.info(f"文本页总数: {total_pages},其中 OCR 页数: {ocr_pages}")
         
         # 验证数据库（如果集合可用）
         try:
@@ -654,8 +654,10 @@ def main():
         logger.error(f"创建向量数据库失败: {e}")
         return
     
-    logger.info("数据摄取管道执行完成！")
+    logger.info("数据摄取管道执行完成")
 
 
 if __name__ == "__main__":
     main()
+
+

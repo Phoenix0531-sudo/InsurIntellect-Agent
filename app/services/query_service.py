@@ -1,6 +1,6 @@
-"""
+﻿"""
 查询服务
-整合向量搜索和LLM生成，提供完整的问答功能
+整合向量搜索和LLM生成,提供完整的问答功能
 """
 
 from datetime import datetime
@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.logging import get_logger
+from app.core.app_logging import get_logger
 from app.models.database_models import QueryHistory, Document, DocumentChunk
 from app.models.schemas import QueryRequest, QueryResponse, RetrievedChunk, QueryStatistics
 from app.core.rag_workflow import get_agent
@@ -17,27 +17,50 @@ logger = get_logger(__name__)
 
 
 class QueryService:
-    """查询服务类"""
+    """查询服务"""
     
     def __init__(self):
-        """初始化查询服务，使用InsurIntellectAgent RAG工作流"""
-        self.agent = get_agent()
+        """初始化查询服务,使用InsurIntellectAgent RAG工作流"""
+        # 延迟初始化agent,避免在服务启动时就创建
+        self._agent = None
+    
+    @property
+    def agent(self):
+        """获取agent实例,使用延迟初始化"""
+        if self._agent is None:
+            logger.info("初始化agent实例...")
+            try:
+                self._agent = get_agent()
+                logger.info(f"Agent实例初始化成功: {type(self._agent)}")
+            except Exception as e:
+                logger.error(f"Agent实例初始化失败: {e}", exc_info=True)
+                raise
+        return self._agent
     
     async def process_query(
         self, 
         db: Session, 
         request: QueryRequest
     ) -> QueryResponse:
-        """处理查询请求，使用InsurIntellectAgent RAG工作流"""
+        """处理查询请求,使用InsurIntellectAgent RAG工作流"""
         start_time = datetime.utcnow()
         
         try:
             # 使用InsurIntellectAgent处理查询
-            answer = self.agent.answer(request.question)
+            logger.debug(f"QueryService.process_query 开始处理查询: {request.question}")
+
+            logger.debug("获取agent实例...")
+            agent = self.agent
+            logger.debug(f"Agent实例类型: {type(agent)}")
+
+            logger.debug("调用agent.answer方法...")
+            answer = agent.answer(request.question)
+            logger.debug(f"Agent返回答案: {answer[:100]}..." if len(answer) > 100 else f"Agent返回答案: {answer}")
             
             # 计算响应时间
             response_time = (datetime.utcnow() - start_time).total_seconds()
             
+            logger.debug("构建响应对象...")
             # 构建响应
             response = QueryResponse(
                 question=request.question,
@@ -45,32 +68,47 @@ class QueryService:
                 query_type=request.query_type,
                 response_time=response_time,
                 chunks_used=request.max_chunks,  # 实际使用的chunk数量由agent内部决定
-                retrieved_chunks=[],  # 暂时为空，可以后续扩展
-                confidence_score=0.9,  # 默认置信度，可以后续优化
+                retrieved_chunks=[],  # 暂时为空,可以后续扩展
+                confidence_score=0.9,  # 默认置信度,可以后续优化
                 query_id=None  # 将在保存历史记录后设置
             )
+            logger.debug("响应对象构建成功")
             
+            logger.debug("保存查询历史...")
             # 保存查询历史
-            query_id = await self._save_query_history(
-                db, 
-                request.question, 
-                answer, 
-                request.query_type, 
-                response_time, 
-                request.max_chunks
-            )
-            response.query_id = query_id
+            try:
+                query_id = await self._save_query_history(
+                    db, 
+                    request.question, 
+                    answer, 
+                    request.query_type, 
+                    response_time, 
+                    request.max_chunks
+                )
+                response.query_id = query_id
+                logger.debug(f"查询历史保存成功,ID: {query_id}")
+            except Exception as save_error:
+                logger.warning(f"查询历史保存失败: {save_error}")
+                # 继续返回响应,不因为历史保存失败而中断
             
+            logger.debug("查询处理完全成功")
             logger.info(f"查询处理完成: {request.question[:50]}..., 用时 {response_time:.2f}s")
             return response
             
         except Exception as e:
-            logger.error(f"查询处理失败: {e}")
+            logger.error(f"查询处理异常: {e}")
+            logger.error(f"异常类型: {type(e).__name__}")
+            import traceback
+            logger.error(f"异常堆栈: {traceback.format_exc()}")
+            
+            logger.error(f"查询处理失败: {e}", exc_info=True)
+            logger.error(f"异常类型: {type(e).__name__}")
+            logger.error(f"异常详情: {str(e)}")
             response_time = (datetime.utcnow() - start_time).total_seconds()
             
             error_response = QueryResponse(
                 question=request.question,
-                answer="抱歉，处理您的查询时出现了错误，请稍后重试。",
+                answer="抱歉,处理您的查询时出现了错误,请稍后重试",
                 query_type=request.query_type,
                 response_time=response_time,
                 chunks_used=0,
@@ -79,6 +117,7 @@ class QueryService:
                 query_id=None
             )
             
+            logger.debug("返回错误响应")
             return error_response
     
     async def _save_query_history(
@@ -109,7 +148,7 @@ class QueryService:
             db.commit()
             db.refresh(query_history)
             
-            logger.info(f"查询历史保存成功，ID: {query_history.id}")
+            logger.info(f"查询历史保存成功,ID: {query_history.id}")
             return query_history.id
             
         except Exception as e:
@@ -141,7 +180,7 @@ class QueryService:
             
             history = query.order_by(QueryHistory.created_at.desc()).offset(skip).limit(limit).all()
             
-            logger.info(f"获取查询历史成功，共 {len(history)} 条记录")
+            logger.info(f"获取查询历史成功,共 {len(history)} 条记录")
             return history
             
         except Exception as e:
@@ -207,7 +246,7 @@ class QueryService:
                 func.date(QueryHistory.created_time) == today
             ).count()
             
-            # 查询类型分布 - 由于数据库模型中没有query_type字段，使用model_used代替
+            # 查询类型分布 - 由于数据库模型中没有query_type字段,使用model_used代替
             query_type_stats = db.query(
                 QueryHistory.model_used,
                 func.count(QueryHistory.model_used).label('count')
@@ -245,3 +284,5 @@ class QueryService:
                 avg_confidence_score=0.0,  # 添加缺失字段
                 feedback_stats={}  # 添加缺失字段
             )
+
+

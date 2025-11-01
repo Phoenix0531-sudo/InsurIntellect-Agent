@@ -1,4 +1,4 @@
-"""日志配置模块
+﻿"""日志配置模块
 使用标准库logging而不是loguru
 """
 
@@ -70,3 +70,5 @@ default_logger = setup_logging(
     log_level=settings.LOG_LEVEL,
     log_file="logs/app.log" if Path("logs").exists() else None
 )
+
+

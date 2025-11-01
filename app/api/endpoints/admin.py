@@ -1,4 +1,4 @@
-"""
+﻿"""
 管理员API端点
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 
 from app.core.database import get_db
-from app.core.logging import get_logger
+from app.core.app_logging import get_logger
 from app.core.config import settings
 from app.models.database_models import Document, DocumentChunk, QueryHistory, SystemMetrics
 from app.models.schemas import (
@@ -186,7 +186,9 @@ async def system_cleanup(
                     
                     cleanup_results["logs_cleaned"] = True
                     cleanup_results["space_freed"] += space_freed
-                    cleanup_results["details"].append(f"清理了 {len([f for f in log_files if datetime.fromtimestamp(os.stat(os.path.join(logs_dir, f)).st_mtime) < cutoff_date])} 个日志文件")
+                    cleanup_results["details"].append(
+                        f"清理了 {len([f for f in log_files if datetime.fromtimestamp(os.stat(os.path.join(logs_dir, f)).st_mtime) < cutoff_date])} 个日志文件"
+                    )
                     
             except Exception as e:
                 cleanup_results["details"].append(f"清理日志文件失败: {e}")
@@ -216,7 +218,9 @@ async def system_cleanup(
                 
                 cleanup_results["temp_files_cleaned"] = True
                 cleanup_results["space_freed"] += space_freed
-                cleanup_results["details"].append(f"清理了 {files_cleaned} 个临时文件")
+                cleanup_results["details"].append(
+                    f"清理了 {files_cleaned} 个临时文件"
+                )
                 
             except Exception as e:
                 cleanup_results["details"].append(f"清理临时文件失败: {e}")
@@ -237,7 +241,9 @@ async def system_cleanup(
                 db.commit()
                 
                 cleanup_results["old_queries_cleaned"] = True
-                cleanup_results["details"].append(f"清理了 {old_queries} 条旧查询记录")
+                cleanup_results["details"].append(
+                    f"清理了 {old_queries} 条旧查询记录"
+                )
                 
             except Exception as e:
                 cleanup_results["details"].append(f"清理旧查询记录失败: {e}")
@@ -563,7 +569,7 @@ async def get_backup_list():
                             backup_info = json.load(f)
                         backups.append(backup_info)
                     except Exception:
-                        # 如果无法读取备份信息，创建基本信息
+                        # 如果无法读取备份信息,创建基本信息
                         stat = os.stat(item_path)
                         backups.append({
                             "backup_name": item,
@@ -599,7 +605,7 @@ async def delete_backup(backup_name: str):
         if not os.path.isdir(backup_path):
             raise HTTPException(status_code=400, detail="无效的备份路径")
         
-        # 安全检查：确保路径在备份目录内
+        # 安全检查:确保路径在备份目录内
         if not os.path.abspath(backup_path).startswith(os.path.abspath(backup_dir)):
             raise HTTPException(status_code=400, detail="无效的备份路径")
         
@@ -614,3 +620,5 @@ async def delete_backup(backup_name: str):
     except Exception as e:
         logger.error(f"删除备份失败: {e}")
         raise HTTPException(status_code=500, detail="删除备份失败")
+
+

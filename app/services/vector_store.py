@@ -15,7 +15,7 @@ try:
 except ImportError:
     pinecone = None
 from app.core.config import settings
-from app.core.logging import get_logger
+from app.core.app_logging import get_logger
 from app.models.schemas import RetrievedChunk
 from app.models.database_models import DocumentChunk
 
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 
 
 class VectorStoreService:
-    """向量存储服务类"""
+    """向量存储服务"""
     
     def __init__(self):
         self.client = None
@@ -61,7 +61,7 @@ class VectorStoreService:
             self.client = chroma_manager.get_client()
             self.collection = chroma_manager.get_collection("insurance_documents")
             
-            logger.info(f"ChromaDB初始化完成，使用单例管理器")
+            logger.info("ChromaDB初始化完成,使用单例管理器")
             logger.info(f"现有ChromaDB集合: insurance_documents")
             
         except Exception as e:
@@ -119,10 +119,10 @@ class VectorStoreService:
             ).all()
             
             if not chunks:
-                logger.warning(f"文档 {document_id} 没有找到块")
+                logger.warning(f"文档 {document_id} 没有找到")
                 return False
             
-            # 批量处理块
+            # 批量处理
             texts = [chunk.content for chunk in chunks]
             chunk_ids = [f"chunk_{chunk.id}" for chunk in chunks]
             
@@ -192,7 +192,7 @@ class VectorStoreService:
             else:
                 raise ValueError(f"不支持的向量数据库类型: {settings.VECTOR_DB_TYPE}")
             
-            logger.info(f"相似度搜索完成，返回 {len(results)} 个结果")
+            logger.info(f"相似度搜索完成,返回 {len(results)} 个结果")
             return results
             
         except Exception as e:
@@ -200,7 +200,7 @@ class VectorStoreService:
             return []
     
     async def _search_chromadb(self, query_embedding: List[float], top_k: int) -> List[Dict[str, Any]]:
-        """在ChromaDB中搜索"""
+        """在 ChromaDB 中搜索"""
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k,
@@ -220,7 +220,7 @@ class VectorStoreService:
         return search_results
     
     async def _search_pinecone(self, query_embedding: List[float], top_k: int) -> List[Dict[str, Any]]:
-        """在Pinecone中搜索"""
+        """在 Pinecone 中搜索"""
         results = self.index.query(
             vector=query_embedding,
             top_k=top_k,
@@ -298,3 +298,5 @@ class VectorStoreService:
             logger.info("向量数据库连接已关闭")
         except Exception as e:
             logger.error(f"关闭向量数据库连接失败: {e}")
+
+

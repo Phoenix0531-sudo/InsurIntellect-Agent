@@ -1,4 +1,4 @@
-"""
+﻿"""
 配置管理模块
 使用Pydantic Settings进行环境变量管理
 """
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field(default="", description="OpenAI API密钥")
     OPENAI_BASE_URL: str = Field(default="https://api.siliconflow.cn/v1", description="OpenAI API基础URL")
     OPENAI_MODEL: str = Field(default="Qwen/Qwen2.5-7B-Instruct", description="OpenAI模型")
-    OPENAI_EMBEDDING_MODEL: str = Field(default="BAAI/bge-large-zh-v1.5", description="嵌入模型")
+    OPENAI_EMBEDDING_MODEL: str = Field(default="BAAI/bge-m3", description="嵌入模型")
     OPENAI_MAX_TOKENS: int = Field(default=1000, description="最大令牌数")
     OPENAI_TEMPERATURE: float = Field(default=0.7, description="温度参数")
     
@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     PINECONE_INDEX_NAME: str = Field(default="insurintellect", description="Pinecone索引名称")
     
     # 兼容性配置
-    EMBEDDING_MODEL: str = Field(default="BAAI/bge-large-zh-v1.5", description="嵌入模型（兼容性）")
+    EMBEDDING_MODEL: str = Field(default="BAAI/bge-m3", description="嵌入模型（兼容性）")
     
     # 数据库配置
     DATABASE_URL: str = Field(default="sqlite:///./data/database/app.db", description="数据库URL")
@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     PROCESSED_DATA_PATH: str = Field(default="./data/processed", description="处理后数据存储路径")
     
     # 文档处理配置
-    CHUNK_SIZE: int = Field(default=200, description="文档块大小")  # 进一步减小到200字符以符合512 token限制
+    CHUNK_SIZE: int = Field(default=200, description="文档块大小")  # 进一步减小到200字符以符合12 token限制
     CHUNK_OVERLAP: int = Field(default=20, description="文档块重叠")  # 相应减小重叠
     MAX_CHUNKS_PER_DOCUMENT: int = Field(default=1000, description="每个文档最大块数")
     
@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     # 监控配置
     ENABLE_METRICS: bool = Field(default=True, description="启用指标")
     METRICS_PORT: int = Field(default=9090, description="指标端口")
+    
+    # 监控和自动重启设置
+    ENABLE_AUTO_RESTART: bool = Field(default=False, description="启用自动重启功能")
+    HEALTH_CHECK_INTERVAL: int = Field(default=30, description="健康检查间隔（秒）")
+    MAX_RESTART_ATTEMPTS: int = Field(default=3, description="最大重启尝试次数")
+    RESTART_COOLDOWN: int = Field(default=60, description="重启冷却时间（秒）")
+    
+    # 结构化日志设置
+    ENABLE_STRUCTURED_LOGGING: bool = Field(default=True, description="启用结构化日志")
+    STRUCTURED_LOG_FILE: str = Field(default="logs/structured.log", description="结构化日志文件路径")
     
     # 后台任务配置
     CELERY_BROKER_URL: Optional[str] = Field(default=None, description="Celery代理URL")
@@ -105,3 +115,5 @@ class Settings(BaseSettings):
 
 # 全局配置实例
 settings = Settings()
+
+

@@ -75,37 +75,6 @@
                     </button>
                 </div>
 
-                <!-- 快速功能 -->
-                <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 sidebar-content">
-                    <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 sidebar-text">快速功能</h3>
-                    <div class="space-y-1">
-                        <button onclick="sendPrompt('帮我分析一下重疾险')" class="w-full text-left p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center space-x-3 group">
-                            <div class="w-6 h-6 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
-                            <i class="fas fa-heartbeat text-gray-600 dark:text-gray-300 text-xs"></i>
-                            </div>
-                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">重疾险分析</span>
-                        </button>
-                        <button onclick="sendPrompt('医疗险产品对比')" class="w-full text-left p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center space-x-3 group">
-                            <div class="w-6 h-6 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
-                            <i class="fas fa-hospital text-gray-600 dark:text-gray-300 text-xs"></i>
-                            </div>
-                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">医疗险对比</span>
-                        </button>
-                        <button onclick="sendPrompt('保险理赔流程指导')" class="w-full text-left p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center space-x-3 group">
-                            <div class="w-6 h-6 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
-                            <i class="fas fa-file-alt text-gray-600 dark:text-gray-300 text-xs"></i>
-                            </div>
-                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">理赔指导</span>
-                        </button>
-                        <button onclick="sendPrompt('保险配置建议')" class="w-full text-left p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center space-x-3 group">
-                            <div class="w-6 h-6 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
-                            <i class="fas fa-lightbulb text-gray-600 dark:text-gray-300 text-xs"></i>
-                            </div>
-                            <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">配置建议</span>
-                        </button>
-                    </div>
-                </div>
-
                 <!-- 聊天历史区域 -->
                 <div class="flex-1 overflow-y-auto">
                     <div class="px-4 py-3 sidebar-content">
@@ -228,7 +197,7 @@
                             rows="1"
                             class="chat-input"
                             onkeydown="handleKeyDown(event)"
-                            oninput="autoResize(this)"
+                            oninput="autoResizeTextarea(this)"
                         ></textarea>
                         <button class="send-button" onclick="sendMessage()" id="sendButton" disabled>
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -256,50 +225,10 @@
     <script>
         // 初始化应用
         document.addEventListener('DOMContentLoaded', function() {
-            initializeApp();
+            // 初始化应用状态
+            showWelcomeSection();
+            checkSystemStatus();
         });
-
-        // 切换侧边栏
-        function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            const sidebarContainer = sidebar.querySelector('.sidebar-container');
-            const sidebarContent = sidebar.querySelectorAll('.sidebar-content');
-            const sidebarText = sidebar.querySelectorAll('.sidebar-text');
-            
-            if (sidebar.classList.contains('w-80')) {
-                // 收缩侧边栏
-                sidebar.classList.remove('w-80');
-                sidebar.classList.add('w-16');
-                
-                // 隐藏文本内容
-                sidebarContent.forEach(el => el.classList.add('hidden'));
-                sidebarText.forEach(el => el.classList.add('hidden'));
-                
-                // 调整按钮样式
-                const newChatBtn = sidebar.querySelector('button[onclick="startNewChat()"]');
-                if (newChatBtn) {
-                    newChatBtn.innerHTML = '<i class="fas fa-plus"></i>';
-                    newChatBtn.classList.add('w-10', 'h-10', 'p-0');
-                    newChatBtn.classList.remove('px-4', 'py-3');
-                }
-            } else {
-                // 展开侧边栏
-                sidebar.classList.remove('w-16');
-                sidebar.classList.add('w-80');
-                
-                // 显示文本内容
-                sidebarContent.forEach(el => el.classList.remove('hidden'));
-                sidebarText.forEach(el => el.classList.remove('hidden'));
-                
-                // 恢复按钮样式
-                const newChatBtn = sidebar.querySelector('button[onclick="startNewChat()"]');
-                if (newChatBtn) {
-                    newChatBtn.innerHTML = '<i class="fas fa-plus text-sm"></i><span class="font-medium sidebar-text">新建对话</span>';
-                    newChatBtn.classList.remove('w-10', 'h-10', 'p-0');
-                    newChatBtn.classList.add('px-4', 'py-3');
-                }
-            }
-        }
 
         // 切换侧边栏
         function toggleSidebar() {
@@ -323,37 +252,69 @@
         function showWelcomeSection() {
             const chatMessages = document.getElementById('chatMessages');
             chatMessages.innerHTML = `
-                <div class="max-w-4xl mx-auto" id="welcomeSection">
+                <div class="max-w-2xl mx-auto typography-premium animate-fade-in" id="welcomeSection">
                     <div class="text-center mb-12">
-                        <h1 class="text-3xl font-light text-gray-900 dark:text-white mb-3">InsurIntellect</h1>
-                        <p class="text-gray-600 dark:text-gray-400 text-lg font-light">
-                            智能保险助手
+                        <div class="w-20 h-20 premium-gradient rounded-2xl flex items-center justify-center mx-auto mb-6 border border-gray-200 dark:border-gray-700">
+                            <i class="fas fa-shield-alt text-gray-700 dark:text-gray-300 text-2xl"></i>
+                        </div>
+                        <h1 class="text-3xl font-semibold text-gray-900 dark:text-white mb-3 tracking-tight">InsurIntellect</h1>
+                        <p class="text-gray-600 dark:text-gray-400 text-lg leading-relaxed max-w-xl mx-auto">
+                            专业的智能保险顾问，为您提供精准的保险分析与建议
                         </p>
                     </div>
 
+                    <div class="divider-elegant mb-8"></div>
+
                     <!-- 建议提示 -->
-                    <div class="space-y-4">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <button class="text-left p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all" onclick="sendPrompt('帮我分析一下重疾险的保障范围和理赔条件')">
-                                <div class="font-medium text-gray-900 dark:text-white mb-2">重疾险分析</div>
-                                <div class="text-sm text-gray-500 dark:text-gray-400">了解重疾险的保障范围和理赔条件</div>
+                    <div class="space-y-4 animate-slide-up">
+                        <h2 class="text-xl font-medium text-gray-900 dark:text-white text-center mb-6">开始对话</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl mx-auto">
+                            <button class="btn-professional text-left" onclick="sendPrompt('帮我分析一下重疾险的保障范围和理赔条件')">
+                                <div class="flex items-center space-x-3">
+                                    <i class="fas fa-heartbeat text-gray-500 dark:text-gray-400"></i>
+                                    <span>重疾险分析</span>
+                                </div>
                             </button>
-                            <button class="text-left p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all" onclick="sendPrompt('我想了解不同年龄段应该如何配置保险')">
-                                <div class="font-medium text-gray-900 dark:text-white mb-2">保险配置建议</div>
-                                <div class="text-sm text-gray-500 dark:text-gray-400">根据年龄段提供个性化保险配置方案</div>
+                            <button class="btn-professional text-left" onclick="sendPrompt('我想了解意外险的保障内容')">
+                                <div class="flex items-center space-x-3">
+                                    <i class="fas fa-shield-alt text-gray-500 dark:text-gray-400"></i>
+                                    <span>意外险咨询</span>
+                                </div>
                             </button>
-                            <button class="text-left p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all" onclick="sendPrompt('请帮我比较几款热门的医疗险产品')">
-                                <div class="font-medium text-gray-900 dark:text-white mb-2">医疗险对比</div>
-                                <div class="text-sm text-gray-500 dark:text-gray-400">对比分析不同医疗险产品的优势</div>
+                            <button class="btn-professional text-left" onclick="sendPrompt('我想了解不同年龄段应该如何配置保险')">
+                                <div class="flex items-center space-x-3">
+                                    <i class="fas fa-users text-gray-500 dark:text-gray-400"></i>
+                                    <span>保险配置建议</span>
+                                </div>
                             </button>
-                            <button class="text-left p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all" onclick="sendPrompt('详细了解保险理赔流程和所需材料')">
-                                <div class="font-medium text-gray-900 dark:text-white mb-2">理赔指导</div>
-                                <div class="text-sm text-gray-500 dark:text-gray-400">详细了解保险理赔流程和所需材料</div>
+                            <button class="btn-professional text-left" onclick="sendPrompt('请帮我比较几款热门的医疗险产品')">
+                                <div class="flex items-center space-x-3">
+                                    <i class="fas fa-hospital text-gray-500 dark:text-gray-400"></i>
+                                    <span>医疗险对比</span>
+                                </div>
                             </button>
                         </div>
                     </div>
                 </div>
             `;
+        }
+
+        // 检查系统状态
+        async function checkSystemStatus() {
+            try {
+                const response = await fetch('/api/v1/health/');
+                const data = await response.json();
+                const statusElement = document.getElementById('model-status');
+                if (statusElement) {
+                    statusElement.textContent = data.status === 'healthy' ? '系统正常' : '系统异常';
+                }
+            } catch (error) {
+                console.error('检查系统状态失败:', error);
+                const statusElement = document.getElementById('model-status');
+                if (statusElement) {
+                    statusElement.textContent = '连接失败';
+                }
+            }
         }
 
         // 发送建议提示
