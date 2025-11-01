@@ -95,12 +95,14 @@ def main():
     parser = argparse.ArgumentParser(description="验证向量库检索并输出摘要")
     parser.add_argument("--question", default="什么是车险的免赔额？", help="检索问题")
     parser.add_argument("--k", type=int, default=5, help="返回TopK结果")
+    parser.add_argument("--quiet", "--log-only", dest="quiet", action="store_true", help="仅输出日志，关闭标准输出")
     args = parser.parse_args()
 
     setup_logging(level="INFO")
     out_file = run_verification(args.question, args.k)
     logger.info(f"检索验证摘要已写入: {out_file}")
-    print(str(out_file))
+    if not args.quiet:
+        print(str(out_file))
 
 
 if __name__ == "__main__":

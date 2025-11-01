@@ -467,6 +467,7 @@ tail -f logs/error.log
 - CLI 脚本：已统一使用日志输出，同时保留必要的标准输出：
   - `scripts/search_pdf_terms.py` 以标准输出打印 JSON 结果（便于管道处理）。
   - `scripts/validate_retrieval.py` 打印生成的 JSON 文件路径，并记录详细日志。
+  - 两个脚本均支持 `--quiet`（等同于 `--log-only`）参数；启用后仅输出日志，不打印标准输出，适合在严格日志管道或后台任务中使用。
 
 ## 📈 性能优化
 

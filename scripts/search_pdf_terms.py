@@ -1,6 +1,7 @@
 import sys
 import re
 import json
+import argparse
 from app.core.app_logging import setup_logging, get_logger
 
 logger = get_logger(__name__)
@@ -60,13 +61,21 @@ def scan_text(text: str, page_index: int):
 
 
 def main():
-    if len(sys.argv) < 2:
-        # 既打印 JSON 错误，亦记录日志
+    parser = argparse.ArgumentParser(description="从PDF中扫描保险术语及数值")
+    parser.add_argument("pdf_path", nargs="?", help="PDF 文件路径")
+    parser.add_argument("--quiet", "--log-only", dest="quiet", action="store_true", help="仅输出日志，关闭标准输出打印")
+    args = parser.parse_args()
+
+    setup_logging(level="INFO")
+
+    if not args.pdf_path:
+        # 既记录日志，也可选择打印 JSON 错误（默认为打印，quiet 时关闭）
         logger.error("参数缺失：需要提供 PDF 路径")
-        print(json.dumps({"error": "missing_arg", "detail": "Usage: python scripts/search_pdf_terms.py <pdf_path>"}, ensure_ascii=False))
+        if not args.quiet:
+            print(json.dumps({"error": "missing_arg", "detail": "Usage: python scripts/search_pdf_terms.py <pdf_path>"}, ensure_ascii=False))
         return
 
-    pdf_path = sys.argv[1]
+    pdf_path = args.pdf_path
     results = []
 
     # Try pdfplumber first
@@ -104,11 +113,11 @@ def main():
             logger.exception(f"PyPDF2 解析失败: {e2}")
             results.append({"error": "pypdf2_failed", "detail": str(e2)})
 
-    # 记录匹配条数，但仍向 stdout 输出 JSON，供下游管道消费
+    # 记录匹配条数；默认向 stdout 输出 JSON，供下游管道消费；quiet 时关闭
     logger.info(f"匹配条目数: {len(results)}")
-    print(json.dumps(results[:50], ensure_ascii=False, indent=2))
+    if not args.quiet:
+        print(json.dumps(results[:50], ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
-    setup_logging(level="INFO")
     main()

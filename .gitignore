@@ -49,6 +49,17 @@ data/processed/
 data/cache/
 data/documents
 
+# 应用数据目录（app/data）与上传、临时文件
+app/data/
+!app/data/**/.gitkeep
+uploads/
+temp/
+
+# 常见数据与数据库文件
+*.sqlite3
+app/data/**/*.jsonl
+app/data/**/*.db
+
 # 日志文件
 logs/
 *.log
