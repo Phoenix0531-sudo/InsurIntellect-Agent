@@ -1,4 +1,4 @@
-﻿"""
+"""
 配置管理模块
 使用Pydantic Settings进行环境变量管理
 """
@@ -78,10 +78,18 @@ class Settings(BaseSettings):
     HEALTH_CHECK_INTERVAL: int = Field(default=30, description="健康检查间隔（秒）")
     MAX_RESTART_ATTEMPTS: int = Field(default=3, description="最大重启尝试次数")
     RESTART_COOLDOWN: int = Field(default=60, description="重启冷却时间（秒）")
-    
+
     # 结构化日志设置
     ENABLE_STRUCTURED_LOGGING: bool = Field(default=True, description="启用结构化日志")
     STRUCTURED_LOG_FILE: str = Field(default="logs/structured.log", description="结构化日志文件路径")
+
+    # 监管感知重排序设置
+    ENABLE_REGULATORY_RERANK: bool = Field(default=True, description="启用监管关联重排序")
+    REGULATORY_FIXED_BOOST: float = Field(default=100.0, description="监管相关固定加分")
+    REGULATORY_KEYWORDS: List[str] = Field(
+        default=["监管", "合规", "评级", "ESG", "银保监", "保监"],
+        description="用于回退判断的监管关键词"
+    )
     
     # 后台任务配置
     CELERY_BROKER_URL: Optional[str] = Field(default=None, description="Celery代理URL")

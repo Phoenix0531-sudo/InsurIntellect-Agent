@@ -178,7 +178,7 @@ class InsurIntellectAgent:
                 "key_concepts": [user_query],
                 "error": f"执行错误: {str(e)}"
             }
-    
+            
     def run_lead_reviewer(self, user_query: str, candidates: List[Document]) -> List[Document]:
         """
         运行首席评审员:筛选最相关的文档块
@@ -255,7 +255,98 @@ class InsurIntellectAgent:
             logger.exception("首席评审员执行失败")
             # 返回前几个文档作为默认选择
             return candidates[:settings.MAX_RETRIEVED_CHUNKS]
-    
+
+    def _is_regulatory_query(self, user_query: str) -> bool:
+        """
+        识别是否为监管相关查询（优先AI判断，失败时关键词回退）
+        """
+        try:
+            # 轻量级判断提示
+            prompt = (
+                "请判断以下用户问题是否与保险监管、法规或合规性高度相关？"
+                "只回答‘是’或‘否’。\n\n"
+                f"用户问题：{user_query}"
+            )
+            resp = self.llm.invoke(prompt)
+            answer = (resp.content or "").strip().replace("。", "")
+            if answer in {"是", "否"}:
+                return answer == "是"
+        except Exception:
+            logger.warning("监管查询AI判断失败，回退到关键词规则")
+        # 关键词回退
+        query_lower = (user_query or "").lower()
+        for kw in settings.REGULATORY_KEYWORDS:
+            if kw.lower() in query_lower:
+                return True
+        return False
+
+    def _is_product_document(self, doc: Document) -> bool:
+        """判断是否为产品相关文档（而非监管文件）"""
+        doc_type = (doc.metadata or {}).get("document_type", "")
+        if not doc_type:
+            return True  # 无类型信息时视为产品文档
+        return "监管" not in doc_type
+
+    def _is_associated_with_regulatory_query(self, user_query: str, doc: Document) -> bool:
+        """
+        判断产品文档是否与监管相关查询高度关联（AI判断，失败时元数据回退）
+        """
+        try:
+            meta = doc.metadata or {}
+            preview = (doc.page_content or "")[:400]
+            prompt = (
+                "以下是一个用户的监管相关查询，以及一个产品文档的摘要与元数据。\n"
+                "请判断该产品文档是否与该监管相关查询高度关联。只回答‘是’或‘否’。\n\n"
+                f"用户查询：{user_query}\n\n"
+                f"文档类型：{meta.get('document_type', '未知')}\n"
+                f"产品名称：{meta.get('product_name', '未知')}\n"
+                f"文档标题：{meta.get('document_title', '未知')}\n"
+                f"内容摘要：{preview}"
+            )
+            resp = self.llm.invoke(prompt)
+            answer = (resp.content or "").strip().replace("。", "")
+            if answer in {"是", "否"}:
+                return answer == "是"
+        except Exception:
+            logger.warning("监管关联AI判断失败，使用元数据回退")
+        # 回退策略：若文档类型包含监管，则不视为产品文档关联；否则弱关联
+        doc_type = (doc.metadata or {}).get("document_type", "")
+        return "监管" not in doc_type
+
+    def _regulatory_rerank(self, user_query: str, candidates: List[Document]) -> List[Document]:
+        """
+        对候选文档进行监管感知重排序：
+        - 若查询为监管相关，则对与查询高度关联的产品文档给予固定加分
+        - 仅改变候选文档顺序，不修改内容
+        """
+        if not settings.ENABLE_REGULATORY_RERANK:
+            return candidates
+        try:
+            if not candidates:
+                return candidates
+            is_reg = self._is_regulatory_query(user_query)
+            if not is_reg:
+                return candidates
+            logger.info("检测到监管相关查询，执行监管感知重排序（固定加分）")
+            scored: List[tuple] = []
+            for doc in candidates:
+                boost = 0.0
+                if self._is_product_document(doc):
+                    try:
+                        associated = self._is_associated_with_regulatory_query(user_query, doc)
+                    except Exception:
+                        associated = False
+                    if associated:
+                        boost = settings.REGULATORY_FIXED_BOOST
+                scored.append((boost, doc))
+            # 按加分倒序排序，保持稳定性
+            scored.sort(key=lambda x: x[0], reverse=True)
+            reranked = [d for _, d in scored]
+            return reranked
+        except Exception as e:
+            logger.error(f"监管感知重排序失败：{e}")
+            return candidates
+
     def run_report_author(self, user_query: str, context: str) -> str:
         """
         运行报告撰写人：生成最终答案
@@ -321,6 +412,9 @@ class InsurIntellectAgent:
             
             logger.info(f"初步检索到 {len(retrieved_docs)} 个文档")
             
+            # 步骤2.5：监管感知重排序（如启用且为监管相关查询）
+            retrieved_docs = self._regulatory_rerank(user_query, retrieved_docs)
+
             # 步骤3: 首席评审员筛选最相关文档
             selected_docs = self.run_lead_reviewer(user_query, retrieved_docs)
             
@@ -328,8 +422,8 @@ class InsurIntellectAgent:
                 logger.warning("首席评审员未选择任何文档")
                 return "抱歉,虽然找到了一些相关信息,但经过评审后发现与您的问题关联度不够高.请尝试重新表述您的问题."
             
-            # 步骤4：整理最终上下文并按时效性重排序
-            logger.info("整理上下文信息并按时效性排序...")
+            # 步骤4：整理最终上下文并按监管关联与时效性重排序
+            logger.info("整理上下文信息并按监管关联与时效性排序...")
             
             # 按文档的有效日期进行排序（如果有的话）
             def get_date_score(doc):
@@ -346,8 +440,18 @@ class InsurIntellectAgent:
                     pass
                 return 0  # 无法解析日期的文档分数为0
             
-            # 按时效性重排序
-            selected_docs.sort(key=get_date_score, reverse=True)
+            # 优先：监管关联的产品文档在前；其次：按时效性降序
+            try:
+                selected_docs.sort(
+                    key=lambda d: (
+                        1 if (settings.ENABLE_REGULATORY_RERANK and self._is_regulatory_query(user_query) and self._is_product_document(d) and self._is_associated_with_regulatory_query(user_query, d)) else 0,
+                        get_date_score(d)
+                    ),
+                    reverse=True
+                )
+            except Exception:
+                # 回退仅按时效性排序
+                selected_docs.sort(key=get_date_score, reverse=True)
             
             # 构建上下文字符串
             context_parts = []
