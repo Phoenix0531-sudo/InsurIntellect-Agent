@@ -179,5 +179,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    setup_logging(level="INFO")
+    # 修正日志初始化参数名以兼容 app.core.app_logging.setup_logging
+    setup_logging(log_level="INFO")
     main()

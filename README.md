@@ -587,3 +587,26 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ## 许可证
 
 MIT License
+
+## 维护与测试变更记录（2025-11-05）
+
+- 清理操作：
+  - 删除历史测试报告（`reports/test_report_*`、`reports/*.junit.xml`）与根目录 `test_cleanup_report.md`。
+  - 仅保留最新报告：`reports/test_report_20251105_214024.md`。
+- 修复脚本：
+  - 将 `scripts/cleanup_tests.py` 中对 `setup_logging` 的调用由 `level=` 更正为 `log_level=`，修复意外参数错误（TypeError）。
+- 测试执行：
+  - 运行 `tools/test_api.py`、`tools/test_rag_workflow.py`、`tools/test_web_interface.py`，基础地址设为 `http://localhost:8001`。
+- 测试结果摘要：
+  - API 与 Web 测试均出现 `HTTPConnectionPool(host='localhost', port=8001)` 连接失败，表现为端口不可达或服务未就绪。
+  - RAG 工作流测试未提供必要参数（`chunks_file`、`query`），触发 `argparse` 用法错误并退出。
+- 当前项目状态：
+  - 测试报告与临时测试文件已完成清理与归档，仅保留最新测试报告。
+  - 建议按 README 的“启动应用”章节使用 `uvicorn` 启动，并在运行测试前通过 `GET /api/v1/health/live` 与 `GET /api/v1/health/ready` 验证服务就绪。
+  - 如需稳定测试，可在 `tools/test_api.py` 与 `tools/test_web_interface.py` 增加就绪轮询与重试逻辑；为 `tools/test_rag_workflow.py`提供示例参数或默认值以避免因参数缺失失败。
+- 复现步骤（示例）：
+  - 启动服务：`python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload`
+  - 运行测试：
+    - `python tools/test_api.py`
+    - `python tools/test_web_interface.py`
+    - `python tools/test_rag_workflow.py data/processed/chunks.jsonl "监管相关条款有哪些？"`
