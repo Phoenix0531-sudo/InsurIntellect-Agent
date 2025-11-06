@@ -610,3 +610,36 @@ MIT License
     - `python tools/test_api.py`
     - `python tools/test_web_interface.py`
     - `python tools/test_rag_workflow.py data/processed/chunks.jsonl "监管相关条款有哪些？"`
+
+## 数据维护与全量回填（2025-11-05）
+
+为保证文档日期元数据完整与质量可控，已在本地启动一次“最完整的全量回填”流程，并对报告与复盘方式进行梳理。
+
+- 运行命令（完整管线）
+  - `python scripts/backfill_metadata.py --batch-size 1000 --workers 12 --max-content-chars 12000 --neighbor-window 700 --report-dir reports`
+  - 说明：优先使用档案官提取接口，其次结合启发式邻近标签抽取；并行 workers=12，批大小 1000，邻近窗口 700 字符，限制每段最大字符数 12000。
+
+- 前置条件
+  - 档案官提取网关需可用：`http://127.0.0.1:8001/archiver/extract-dates`
+  - 若外部档案官不可用，可改用 `--fallback` 走启发式本地回退（覆盖面可能略低）。
+
+- 报告输出
+  - 报告目录：`reports/`
+  - 命名规则：`backfill_report_YYYYMMDD_HHmmss.json` 与同名 `.html` 汇总（若启用），示例：`reports/backfill_report_20251105_215044.json`
+  - 读取最新报告：`python scripts/read_latest_report.py`
+
+- 失败重试与增量
+  - 失败重试：`python scripts/backfill_metadata.py --retry-failed-from <上次报告.json> --batch-size 500 --workers 8 --report-dir reports`
+  - 条件过滤（一次性修补指定范围）：`--where-json '{"source":"pdf","vendor":"XXX"}'`
+  - 增量及时性修复：`python scripts/run_timeliness_recovery.py --report-dir reports --neighbor-window 700 --max-content-chars 12000`
+
+- 当前状态
+  - 已按上述完整参数启动全量回填，报告将生成于 `reports/` 目录；生成后可用 `scripts/read_latest_report.py` 查看摘要，并在本 README 的“维护与测试变更记录”中补充本次结果。
+
+- 复现与验证
+  - 清空旧报告：`PowerShell: Remove-Item reports\* -Recurse -Force`
+  - 启动回填：见“运行命令”一节；建议在应用或网关就绪后再执行，避免连接失败。
+  - 阅读摘要：`python scripts/read_latest_report.py`
+  - 汇总报告：`python scripts/report_backfill.py --report-dir reports`
+
+> 注：若在 CI 中运行，建议同时生成机器可读 JSON 与简要 Markdown，以便后续统计。同时可在测试脚本中加入网关就绪轮询与重试，以降低临时不可用对结果的影响。
