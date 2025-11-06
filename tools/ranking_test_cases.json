@@ -1,0 +1,91 @@
+{
+  "new_document_recall": [
+    {
+      "id": "recall-001",
+      "query": "请给我最近发布的车险条款更新摘要",
+      "top_k": 3,
+      "recent_days": 30,
+      "product_type_candidates": ["车险", "健康险", "人寿险", "旅行险", "财产险"],
+      "notes": "新发布文档应在TOP3出现，按生效/发布日期判断"
+    },
+    {
+      "id": "recall-002",
+      "query": "最新的人寿保险费率变更说明有哪些？",
+      "top_k": 3,
+      "recent_days": 45,
+      "product_type_candidates": ["人寿险"],
+      "notes": "人寿险新文档召回验证"
+    },
+    {
+      "id": "recall-003",
+      "query": "近期健康险报销规则有何更新？",
+      "top_k": 3,
+      "recent_days": 60,
+      "product_type_candidates": ["健康险"],
+      "notes": "健康险新文档召回验证"
+    },
+    {
+      "id": "recall-004",
+      "query": "旅行险保障条款近期版本变更总结",
+      "top_k": 3,
+      "recent_days": 90,
+      "product_type_candidates": ["旅行险"],
+      "notes": "旅行险新文档召回验证"
+    },
+    {
+      "id": "recall-005",
+      "query": "财产险最近版本的赔付流程说明",
+      "top_k": 3,
+      "recent_days": 90,
+      "product_type_candidates": ["财产险"],
+      "notes": "财产险新文档召回验证"
+    }
+  ],
+  "expired_document_suppression": [
+    {
+      "id": "suppress-001",
+      "query": "车险理赔指南（包含旧版与新版）",
+      "expired_threshold_days": 365,
+      "max_rank_for_expired": 10,
+      "notes": "过期文档排名应低于第10位"
+    },
+    {
+      "id": "suppress-002",
+      "query": "人寿险产品说明书（多版本并存）",
+      "expired_threshold_days": 540,
+      "max_rank_for_expired": 10,
+      "notes": "覆盖不同过期模式：极旧版本"
+    },
+    {
+      "id": "suppress-003",
+      "query": "健康险报销政策（历史版本与最新版本）",
+      "expired_threshold_days": 720,
+      "max_rank_for_expired": 10,
+      "notes": "覆盖不同过期模式：两年前版本"
+    }
+  ],
+  "regulatory_alignment": [
+    {
+      "id": "reg-001",
+      "query": "银保监会关于健康险报销合规要求的最新通知",
+      "min_rank_gain": 5,
+      "affected_product_hint": "健康险相关的产品说明/条款",
+      "notes": "监管关键词触发，受影响产品文档排名提升≥5位"
+    },
+    {
+      "id": "reg-002",
+      "query": "ESG评级对人寿险产品销售的监管影响",
+      "min_rank_gain": 5,
+      "affected_product_hint": "人寿险相关文档",
+      "notes": "覆盖主要监管领域：ESG"
+    },
+    {
+      "id": "reg-003",
+      "query": "合规检查中车险保费计算规则的整改建议",
+      "min_rank_gain": 5,
+      "affected_product_hint": "车险相关文档",
+      "notes": "覆盖主要监管领域：合规与保费计算"
+    }
+  ]
+}
+

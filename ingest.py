@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 InsurIntellect Agent - Data Ingestion Pipeline
 =============================================
@@ -29,7 +29,10 @@ from langchain_chroma import Chroma
 
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain.schema import Document
+try:
+    from langchain_core.documents import Document
+except Exception:
+    from langchain.schema import Document
 
 # Project imports
 from app.core.config import settings

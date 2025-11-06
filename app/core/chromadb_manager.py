@@ -21,7 +21,8 @@ class ChromaDBManager:
     """
 
     _instance: Optional["ChromaDBManager"] = None
-    _lock = threading.Lock()
+    # 使用可重入锁以避免在 get_collection 调用 get_client 时的二次加锁死锁
+    _lock = threading.RLock()
     _client: Optional[chromadb.Client] = None
     _collection: Optional[chromadb.Collection] = None
 
@@ -114,4 +115,3 @@ class ChromaDBManager:
 
 # 全局单例实例
 chroma_manager = ChromaDBManager()
-

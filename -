@@ -1,0 +1,165 @@
+{
+  "source_report": "reports\\backfill_report_20251102_223608.json",
+  "analyzed_groups": [
+    {
+      "group_key": "path:data\\documents\\pdfs\\113012\\flbe.pdf",
+      "file_path": "data\\documents\\pdfs\\113012\\flbe.pdf",
+      "source_file": "flbe.pdf",
+      "sample_chunk_count": 12,
+      "avg_text_len": 167.9,
+      "ocr_ratio": 0.0,
+      "has_expiry_label": false,
+      "has_filing_label": false,
+      "has_any_date": false,
+      "issue": "文本未出现时效性线索（标签/日期均缺失）",
+      "suggestions": [
+        "提高档案官调用的最大内容字符数�?-max-content-chars 12000�?,
+        "从PDF元数�?目录年份兜底，无法准确得到有效期则标记为‘未�?不定期�?
+      ]
+    },
+    {
+      "group_key": "path:data\\documents\\pdfs\\113013\\flbe.pdf",
+      "file_path": "data\\documents\\pdfs\\113013\\flbe.pdf",
+      "source_file": "flbe.pdf",
+      "sample_chunk_count": 12,
+      "avg_text_len": 184.2,
+      "ocr_ratio": 0.0,
+      "has_expiry_label": false,
+      "has_filing_label": false,
+      "has_any_date": false,
+      "issue": "文本未出现时效性线索（标签/日期均缺失）",
+      "suggestions": [
+        "提高档案官调用的最大内容字符数�?-max-content-chars 12000�?,
+        "从PDF元数�?目录年份兜底，无法准确得到有效期则标记为‘未�?不定期�?
+      ]
+    },
+    {
+      "group_key": "path:data\\documents\\pdfs\\422001\\sms.pdf",
+      "file_path": "data\\documents\\pdfs\\422001\\sms.pdf",
+      "source_file": "sms.pdf",
+      "sample_chunk_count": 12,
+      "avg_text_len": 102.9,
+      "ocr_ratio": 0.0,
+      "has_expiry_label": true,
+      "has_filing_label": false,
+      "has_any_date": false,
+      "issue": "标签出现但未匹配到日�?,
+      "suggestions": [
+        "增大标签邻近窗口（如 --neighbor-window 600�?,
+        "扩展中文日期与分隔符变体正则（例�?�?�?日、空�?无分隔）"
+      ]
+    },
+    {
+      "group_key": "path:data\\documents\\pdfs\\413004\\flbe.pdf",
+      "file_path": "data\\documents\\pdfs\\413004\\flbe.pdf",
+      "source_file": "flbe.pdf",
+      "sample_chunk_count": 12,
+      "avg_text_len": 164.7,
+      "ocr_ratio": 0.0,
+      "has_expiry_label": false,
+      "has_filing_label": false,
+      "has_any_date": false,
+      "issue": "文本未出现时效性线索（标签/日期均缺失）",
+      "suggestions": [
+        "提高档案官调用的最大内容字符数�?-max-content-chars 12000�?,
+        "从PDF元数�?目录年份兜底，无法准确得到有效期则标记为‘未�?不定期�?
+      ]
+    },
+    {
+      "group_key": "path:data\\documents\\pdfs\\413005\\flbe.pdf",
+      "file_path": "data\\documents\\pdfs\\413005\\flbe.pdf",
+      "source_file": "flbe.pdf",
+      "sample_chunk_count": 12,
+      "avg_text_len": 167.9,
+      "ocr_ratio": 0.0,
+      "has_expiry_label": false,
+      "has_filing_label": false,
+      "has_any_date": false,
+      "issue": "文本未出现时效性线索（标签/日期均缺失）",
+      "suggestions": [
+        "提高档案官调用的最大内容字符数�?-max-content-chars 12000�?,
+        "从PDF元数�?目录年份兜底，无法准确得到有效期则标记为‘未�?不定期�?
+      ]
+    },
+    {
+      "group_key": "path:data\\documents\\pdfs\\413006\\flbe.pdf",
+      "file_path": "data\\documents\\pdfs\\413006\\flbe.pdf",
+      "source_file": "flbe.pdf",
+      "sample_chunk_count": 12,
+      "avg_text_len": 168.8,
+      "ocr_ratio": 0.0,
+      "has_expiry_label": false,
+      "has_filing_label": false,
+      "has_any_date": false,
+      "issue": "文本未出现时效性线索（标签/日期均缺失）",
+      "suggestions": [
+        "提高档案官调用的最大内容字符数�?-max-content-chars 12000�?,
+        "从PDF元数�?目录年份兜底，无法准确得到有效期则标记为‘未�?不定期�?
+      ]
+    },
+    {
+      "group_key": "path:data\\documents\\pdfs\\415012\\sms.pdf",
+      "file_path": "data\\documents\\pdfs\\415012\\sms.pdf",
+      "source_file": "sms.pdf",
+      "sample_chunk_count": 12,
+      "avg_text_len": 96.2,
+      "ocr_ratio": 0.0,
+      "has_expiry_label": true,
+      "has_filing_label": false,
+      "has_any_date": false,
+      "issue": "标签出现但未匹配到日�?,
+      "suggestions": [
+        "增大标签邻近窗口（如 --neighbor-window 600�?,
+        "扩展中文日期与分隔符变体正则（例�?�?�?日、空�?无分隔）"
+      ]
+    },
+    {
+      "group_key": "path:data\\documents\\pdfs\\415011\\sms.pdf",
+      "file_path": "data\\documents\\pdfs\\415011\\sms.pdf",
+      "source_file": "sms.pdf",
+      "sample_chunk_count": 12,
+      "avg_text_len": 98.5,
+      "ocr_ratio": 0.0,
+      "has_expiry_label": true,
+      "has_filing_label": false,
+      "has_any_date": false,
+      "issue": "标签出现但未匹配到日�?,
+      "suggestions": [
+        "增大标签邻近窗口（如 --neighbor-window 600�?,
+        "扩展中文日期与分隔符变体正则（例�?�?�?日、空�?无分隔）"
+      ]
+    },
+    {
+      "group_key": "path:data\\documents\\pdfs\\123001\\sms.pdf",
+      "file_path": "data\\documents\\pdfs\\123001\\sms.pdf",
+      "source_file": "sms.pdf",
+      "sample_chunk_count": 12,
+      "avg_text_len": 103.4,
+      "ocr_ratio": 0.0,
+      "has_expiry_label": true,
+      "has_filing_label": false,
+      "has_any_date": false,
+      "issue": "标签出现但未匹配到日�?,
+      "suggestions": [
+        "增大标签邻近窗口（如 --neighbor-window 600�?,
+        "扩展中文日期与分隔符变体正则（例�?�?�?日、空�?无分隔）"
+      ]
+    },
+    {
+      "group_key": "path:data\\documents\\pdfs\\315062\\flbe.pdf",
+      "file_path": "data\\documents\\pdfs\\315062\\flbe.pdf",
+      "source_file": "flbe.pdf",
+      "sample_chunk_count": 12,
+      "avg_text_len": 161.6,
+      "ocr_ratio": 0.0,
+      "has_expiry_label": false,
+      "has_filing_label": false,
+      "has_any_date": false,
+      "issue": "文本未出现时效性线索（标签/日期均缺失）",
+      "suggestions": [
+        "提高档案官调用的最大内容字符数�?-max-content-chars 12000�?,
+        "从PDF元数�?目录年份兜底，无法准确得到有效期则标记为‘未�?不定期�?
+      ]
+    }
+  ]
+}

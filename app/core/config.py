@@ -90,6 +90,15 @@ class Settings(BaseSettings):
         default=["监管", "合规", "评级", "ESG", "银保监", "保监"],
         description="用于回退判断的监管关键词"
     )
+
+    # 时效性评分与抑制设置（依据《备案管理办法》《数据安全法》）
+    TIMELINESS_WEIGHT: float = Field(default=50.0, description="时效性分数的整体权重缩放")
+    TIMELINESS_RETENTION_DAYS: int = Field(default=540, description="超过保留阈值视为过期（天）")
+    TIMELINESS_DECAY_CAP_DAYS: int = Field(default=720, description="时效性线性衰减的封顶天数")
+    TIMELINESS_RECENT_BONUS_DAYS: int = Field(default=30, description="最近加分的天数阈值")
+    TIMELINESS_RECENT_BONUS: float = Field(default=10.0, description="最近加分分值")
+    TIMELINESS_PRE_EFFECTIVE_PENALTY_FACTOR: float = Field(default=0.3, description="生效前降权系数")
+    TIMELINESS_WEAK_SOURCE_PENALTY_FACTOR: float = Field(default=0.6, description="弱信号日期来源降权系数")
     
     # 后台任务配置
     CELERY_BROKER_URL: Optional[str] = Field(default=None, description="Celery代理URL")

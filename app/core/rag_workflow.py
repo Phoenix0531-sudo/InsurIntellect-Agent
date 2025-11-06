@@ -32,6 +32,9 @@ from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
+# 新增导入：用于构建提示与解析输出（AI判别辅助）
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 # 导入应用配置和提示模板
 from app.prompts import (
@@ -39,6 +42,7 @@ from app.prompts import (
     LEAD_REVIEWER_PROMPT,
     REPORT_AUTHOR_PROMPT
 )
+from app.core.timeliness import compute_timeliness_score
 
 # Configure logging
 logging.basicConfig(
@@ -112,7 +116,32 @@ class InsurIntellectAgent:
                 search_kwargs={"k": settings.MAX_RETRIEVED_CHUNKS * 2}  # 初步检索更多文档供后续筛选
             )
             logger.info(f"ChromaDB检索器初始化成功,检索路径: {settings.CHROMA_PERSIST_DIRECTORY}")
-            
+
+            # 新增：加载并缓存监管文件，以便快速访问和后续AI判断参考
+            # 说明：优先使用向量库检索器的 get 能力，失败时回退到底层 Chroma collection
+            logger.info("正在加载并缓存监管文件...")
+            try:
+                # 假设数据库中，监管文件的元数据 document_type 被标记为 '监管文件'
+                self.regulatory_docs = self.retriever.vectorstore.get(
+                    where={"document_type": "监管文件"},
+                    include=["metadatas", "documents"]
+                )
+                count = len(self.regulatory_docs.get("documents", []) or [])
+                logger.info(f"已缓存 {count} 份监管文件。")
+            except Exception as e:
+                logger.warning(f"通过检索器缓存监管文件失败，尝试底层collection: {e}")
+                try:
+                    # 回退到底层 chroma collection
+                    self.regulatory_docs = self.vectorstore._collection.get(
+                        where={"document_type": "监管文件"},
+                        include=["metadatas", "documents"]
+                    )
+                    count = len(self.regulatory_docs.get("documents", []) or [])
+                    logger.info(f"已缓存 {count} 份监管文件（底层collection）。")
+                except Exception as e2:
+                    logger.warning(f"缓存监管文件失败: {e2}")
+                    self.regulatory_docs = {}
+
         except Exception as e:
             logger.exception("初始化InsurIntellect智能代理失败")
             raise
@@ -257,26 +286,18 @@ class InsurIntellectAgent:
             return candidates[:settings.MAX_RETRIEVED_CHUNKS]
 
     def _is_regulatory_query(self, user_query: str) -> bool:
-        """
-        识别是否为监管相关查询（优先AI判断，失败时关键词回退）
-        """
+        """重构：改为调用新的 AI 方法，并保留关键词回退"""
         try:
-            # 轻量级判断提示
-            prompt = (
-                "请判断以下用户问题是否与保险监管、法规或合规性高度相关？"
-                "只回答‘是’或‘否’。\n\n"
-                f"用户问题：{user_query}"
-            )
-            resp = self.llm.invoke(prompt)
-            answer = (resp.content or "").strip().replace("。", "")
-            if answer in {"是", "否"}:
-                return answer == "是"
+            ai_result = self._is_query_regulatory(user_query)
+            if ai_result:
+                return True
         except Exception:
-            logger.warning("监管查询AI判断失败，回退到关键词规则")
-        # 关键词回退
+            logger.warning("_is_query_regulatory 执行异常，启用关键词回退")
+        # 当AI返回否或异常时，使用关键词回退增强鲁棒性
         query_lower = (user_query or "").lower()
         for kw in settings.REGULATORY_KEYWORDS:
             if kw.lower() in query_lower:
+                logger.info("关键词命中，视为监管相关查询")
                 return True
         return False
 
@@ -288,28 +309,14 @@ class InsurIntellectAgent:
         return "监管" not in doc_type
 
     def _is_associated_with_regulatory_query(self, user_query: str, doc: Document) -> bool:
-        """
-        判断产品文档是否与监管相关查询高度关联（AI判断，失败时元数据回退）
-        """
+        """重构：改为调用新的 AI 方法，并保留元数据回退"""
         try:
-            meta = doc.metadata or {}
-            preview = (doc.page_content or "")[:400]
-            prompt = (
-                "以下是一个用户的监管相关查询，以及一个产品文档的摘要与元数据。\n"
-                "请判断该产品文档是否与该监管相关查询高度关联。只回答‘是’或‘否’。\n\n"
-                f"用户查询：{user_query}\n\n"
-                f"文档类型：{meta.get('document_type', '未知')}\n"
-                f"产品名称：{meta.get('product_name', '未知')}\n"
-                f"文档标题：{meta.get('document_title', '未知')}\n"
-                f"内容摘要：{preview}"
-            )
-            resp = self.llm.invoke(prompt)
-            answer = (resp.content or "").strip().replace("。", "")
-            if answer in {"是", "否"}:
-                return answer == "是"
+            ai_result = self._is_doc_related_to_regulatory_query(doc, user_query)
+            if ai_result:
+                return True
         except Exception:
-            logger.warning("监管关联AI判断失败，使用元数据回退")
-        # 回退策略：若文档类型包含监管，则不视为产品文档关联；否则弱关联
+            logger.warning("_is_doc_related_to_regulatory_query 执行异常，启用元数据回退")
+        # 当AI返回否或异常时，使用元数据回退增强鲁棒性
         doc_type = (doc.metadata or {}).get("document_type", "")
         return "监管" not in doc_type
 
@@ -377,6 +384,95 @@ class InsurIntellectAgent:
         except Exception as e:
             logger.exception("报告撰写人执行失败")
             return f"抱歉,在生成答案时遇到了问题:{str(e)}"
+
+    # 新增：动态排序主函数（监管规则驱动 + AI赋能）
+    def _dynamic_ranking(self, docs: List[Document], query: str) -> List[Document]:
+        """
+        执行多维度的动态排序，综合考虑相关性、时效性和AI驱动的监管对齐。
+
+        逻辑说明：
+        - 先用 AI 判断查询是否为监管相关（_is_query_regulatory）。
+        - 对每个文档计算：基础分 + 时效性分*权重 + 监管对齐加分。
+        - 最终按得分降序排序，返回文档列表。
+        """
+
+        # 步骤1：使用AI判断查询是否与监管相关
+        is_regulatory_query = self._is_query_regulatory(query)
+
+        ranked_docs_with_scores: List[tuple] = []
+
+        # 使用规则引擎：根据元数据与制度文本原则计算时效性分数（0~100）
+        def get_timeliness(metadata: Dict[str, Any]) -> float:
+            try:
+                return compute_timeliness_score(metadata)
+            except Exception:
+                return 0.0
+
+        # 步骤2：逐文档计算得分并累计
+        for doc in docs:
+            metadata = doc.metadata or {}
+
+            # 1. 基础分：初始相关性分，这里设为1.0
+            base_score = 1.0
+
+            # 2. 时效性得分：规则引擎（0~100），由配置进行整体权重缩放
+            timeliness_score = get_timeliness(metadata)
+
+            # 3. 监管对齐加分
+            regulatory_boost = 0.0
+            if is_regulatory_query:
+                # 如果是监管相关查询，则进一步判断当前文档是否与该查询高度关联
+                try:
+                    if self._is_doc_related_to_regulatory_query(doc, query):
+                        regulatory_boost = 100.0  # 给予巨大的权重加分
+                except Exception as e:
+                    logger.warning(f"监管对齐加分评估失败，忽略加分: {e}")
+
+            # 4. 计算最终得分：基础分 + 时效性分*权重 + 监管加分
+            final_score = base_score + (timeliness_score * settings.TIMELINESS_WEIGHT) + regulatory_boost
+
+            ranked_docs_with_scores.append((doc, final_score))
+
+        # 按最终得分进行降序排序
+        sorted_docs_with_scores = sorted(ranked_docs_with_scores, key=lambda x: x[1], reverse=True)
+
+        # 只返回排序后的文档对象
+        return [doc for doc, score in sorted_docs_with_scores]
+
+    # 新增：AI辅助方法——判断查询是否与监管高度相关
+    def _is_query_regulatory(self, query: str) -> bool:
+        """使用AI判断一个查询是否与保险监管、法规或合规性高度相关"""
+        try:
+            prompt_text = (
+                "请判断以下用户问题是否与保险监管、法规或合规性高度相关？"
+                "请只回答'是'或'否'。\n\n"
+                f"问题：'{query}'"
+            )
+            prompt = ChatPromptTemplate.from_template(prompt_text)
+            chain = prompt | self.llm | StrOutputParser()
+            response = chain.invoke({})
+            return "是" in (response or "")
+        except Exception as e:
+            logger.warning(f"判断查询监管相关性时出错: {e}")
+            return False
+
+    # 新增：AI辅助方法——判断文档是否与监管相关查询高度关联
+    def _is_doc_related_to_regulatory_query(self, doc: Document, query: str) -> bool:
+        """使用AI判断一个文档是否与一个已知的监管相关查询高度关联"""
+        try:
+            doc_snippet = (doc.page_content or "")[:500]  # 取文档摘要进行判断，以提高效率
+            prompt_text = (
+                "已知用户问题是关于保险监管的。请判断以下文档摘要是否与这个问题高度相关？"
+                "请只回答'是'或'否'。\n\n"
+                f"用户问题：'{query}'\n\n文档摘要：'{doc_snippet}'"
+            )
+            prompt = ChatPromptTemplate.from_template(prompt_text)
+            chain = prompt | self.llm | StrOutputParser()
+            response = chain.invoke({})
+            return "是" in (response or "")
+        except Exception as e:
+            logger.warning(f"判断文档与监管查询关联性时出错: {e}")
+            return False
     
     def answer(self, user_query: str) -> str:
         """
@@ -401,6 +497,8 @@ class InsurIntellectAgent:
             # 步骤1：查询架构师重写查询
             architect_result = self.run_query_architect(user_query)
             rewritten_query = architect_result.get("rewritten_query", user_query)
+            # 新增：独立查询（用于动态排序中的AI判断输入）
+            standalone_query = rewritten_query
             
             # 步骤2：使用重写后的查询进行初步检索
             logger.info(f"使用重写查询进行检索: {rewritten_query}")
@@ -422,40 +520,13 @@ class InsurIntellectAgent:
                 logger.warning("首席评审员未选择任何文档")
                 return "抱歉,虽然找到了一些相关信息,但经过评审后发现与您的问题关联度不够高.请尝试重新表述您的问题."
             
-            # 步骤4：整理最终上下文并按监管关联与时效性重排序
-            logger.info("整理上下文信息并按监管关联与时效性排序...")
-            
-            # 按文档的有效日期进行排序（如果有的话）
-            def get_date_score(doc):
-                """根据文档日期计算时效性分数,越新的文档分数越高"""
-                try:
-                    effective_date = doc.metadata.get('effective_date', '')
-                    if effective_date and effective_date != '未知':
-                        # 尝试解析日期
-                        date_obj = datetime.strptime(effective_date, '%Y-%m-%d')
-                        # 计算距离现在的天数,越近分数越高
-                        days_diff = (datetime.now() - date_obj).days
-                        return max(0, 10000 - days_diff)  # 基础分数减去天数差
-                except:
-                    pass
-                return 0  # 无法解析日期的文档分数为0
-            
-            # 优先：监管关联的产品文档在前；其次：按时效性降序
-            try:
-                selected_docs.sort(
-                    key=lambda d: (
-                        1 if (settings.ENABLE_REGULATORY_RERANK and self._is_regulatory_query(user_query) and self._is_product_document(d) and self._is_associated_with_regulatory_query(user_query, d)) else 0,
-                        get_date_score(d)
-                    ),
-                    reverse=True
-                )
-            except Exception:
-                # 回退仅按时效性排序
-                selected_docs.sort(key=get_date_score, reverse=True)
-            
+            # 步骤4：整理最终上下文并进行动态排序（替换原先的仅按时效性排序）
+            logger.info("整理上下文信息并进行动态排序（监管规则 + AI加权）...")
+            sorted_docs = self._dynamic_ranking(selected_docs, standalone_query)
+
             # 构建上下文字符串
             context_parts = []
-            for i, doc in enumerate(selected_docs, 1):
+            for i, doc in enumerate(sorted_docs, 1):
                 metadata_info = []
                 if doc.metadata.get('document_title'):
                     metadata_info.append(f"文档标题: {doc.metadata['document_title']}")
