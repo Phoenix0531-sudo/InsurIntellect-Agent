@@ -1,0 +1,385 @@
+{
+  "corpus": [
+    {
+      "id": "DOC001",
+      "title": "医疗险-等待期与报销比例",
+      "content": "本医疗保险条款规定等待期为30天；住院医疗费用按80%比例报销，门诊急诊按70%比例报销；年度免赔额1000元；既往症不予赔付；需在指定合作医院就医。",
+      "product_type": "医疗险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC002",
+      "title": "医疗险-等待期60天与报销比例",
+      "content": "本医疗险等待期为60天；住院报销比例最高90%；门诊报销比例60%；年度免赔额为0；既往症除外。",
+      "product_type": "医疗险",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC003",
+      "title": "医疗险-报销流程与发票要求",
+      "content": "本医疗险报销流程需提交索赔材料与有效发票原件，且须在规定时限内；指定医院清单详见附录。",
+      "product_type": "医疗险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC004",
+      "title": "医疗险-续保条件与保费调整",
+      "content": "医疗险续保不设强制体检；保险公司保留基于年龄与理赔记录调整保费的权利；拒保情况将提前通知。",
+      "product_type": "医疗险",
+      "version": "v2022",
+      "is_expired": false
+    },
+    {
+      "id": "DOC005",
+      "title": "医疗险-住院津贴",
+      "content": "医疗险住院津贴每日200元，累计最多90天；需提供住院证明与费用清单，津贴不与医疗费用报销重复。",
+      "product_type": "医疗险",
+      "version": "v2021",
+      "is_expired": true
+    },
+    {
+      "id": "DOC006",
+      "title": "医疗险-既往症条款与免责",
+      "content": "既往症条款：包括糖尿病、慢性胃病等既往病症原则上不予理赔；免责条款详述于附录。",
+      "product_type": "医疗险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC007",
+      "title": "医疗险-门诊慢病管理",
+      "content": "门诊慢性病管理项目纳入保障范围；专科门诊报销比例依照目录执行，需在指定医院就诊。",
+      "product_type": "医疗险",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC008",
+      "title": "医疗险-年度免赔额与共同支付",
+      "content": "本医疗险年度免赔额2000元；超过免赔额部分按80%比例报销；共同支付比例不超过20%。",
+      "product_type": "医疗险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC009",
+      "title": "医疗险-药品目录",
+      "content": "药品目录包含甲类与乙类药品；自费药品原则上不予报销；特药需提前备案。",
+      "product_type": "医疗险",
+      "version": "v2022",
+      "is_expired": false
+    },
+    {
+      "id": "DOC010",
+      "title": "重疾险-癌症二次赔付",
+      "content": "重疾险癌症二次赔付设置间隔期3年；满足康复期要求后可第二次给付，额度不超过基本保额。",
+      "product_type": "重疾险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC011",
+      "title": "重疾险-保费豁免条款",
+      "content": "重疾险保费豁免条款：被保险人初次确诊重大疾病后，后续保费予以豁免；轻症豁免条件不同。",
+      "product_type": "重疾险",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC012",
+      "title": "重疾险-等待期与投保年龄",
+      "content": "重疾险等待期为90天；犹豫期15天；投保年龄为0—60岁；对既往症设置合理限制。",
+      "product_type": "重疾险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC013",
+      "title": "寿险-身故赔付",
+      "content": "寿险条款：被保险人身故按基本保额100%给付；投保年龄18—65岁；犹豫期15天。",
+      "product_type": "寿险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC014",
+      "title": "寿险-现金价值与复效",
+      "content": "寿险现金价值随年度增长；保单失效后可在90天内申请复效，需补交保费或通过体检；身故赔付比例详述。",
+      "product_type": "寿险",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC015",
+      "title": "年金险-保证领取期",
+      "content": "年金险合同约定保证领取期10年；提前退保可能导致损失；领取方式可按月或按年。",
+      "product_type": "年金险",
+      "version": "v2022",
+      "is_expired": false
+    },
+    {
+      "id": "DOC016",
+      "title": "意外险-高风险运动与航空意外",
+      "content": "意外险高风险运动（攀岩、潜水、跳伞、赛车）除外；乘坐商业航班发生意外可额外给付200%保额。",
+      "product_type": "意外险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC017",
+      "title": "意外险-门急诊医疗",
+      "content": "意外伤害医疗赔付额度1万元；门诊医疗报销需扣除200元免赔额；含门急诊保障。",
+      "product_type": "意外险",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC018",
+      "title": "意外险-骑行与自驾保障",
+      "content": "意外险对骑行与自驾旅游提供保障；醉酒状态导致的事故除外；具体除外责任详列。",
+      "product_type": "意外险",
+      "version": "v2022",
+      "is_expired": false
+    },
+    {
+      "id": "DOC019",
+      "title": "旅行险-境外紧急医疗与援助",
+      "content": "旅行险提供境外旅游紧急医疗保障额度10万元；可提供垫付与24小时援助服务；需事先报案。",
+      "product_type": "旅行险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC020",
+      "title": "旅行险-行李与航班延误",
+      "content": "旅行险对行李延误与航班延误提供赔付，单次赔付上限2000元；需提供官方证明。",
+      "product_type": "旅行险",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC021",
+      "title": "旅行险-隔离与不可抗力",
+      "content": "旅行险针对出入境传染病隔离与不可抗力事件给出理赔引导；援助服务覆盖全球主要地区。",
+      "product_type": "旅行险",
+      "version": "v2022",
+      "is_expired": false
+    },
+    {
+      "id": "DOC022",
+      "title": "车险-第三者责任险",
+      "content": "车险第三者责任险保额50万元；可附加不计免赔；免赔额与理赔规则按条款执行。",
+      "product_type": "车险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC023",
+      "title": "车险-玻璃单独破碎险",
+      "content": "车险玻璃单独破碎险区分国产与进口玻璃；进口玻璃赔付限额较高；需现场照片。",
+      "product_type": "车险",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC024",
+      "title": "车险-代驾与盗抢险",
+      "content": "车险代驾责任险与盗抢险合并销售；部分情形不予赔付如车钥匙遗失导致盗抢。",
+      "product_type": "车险",
+      "version": "v2022",
+      "is_expired": false
+    },
+    {
+      "id": "DOC025",
+      "title": "家庭险-家财火灾爆炸",
+      "content": "家庭综合险保障家财因火灾、爆炸造成的损失；赔偿限额依保单约定。",
+      "product_type": "家庭险",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC026",
+      "title": "家庭险-盗抢损失与折旧",
+      "content": "家庭综合险对盗抢损失进行赔偿；折旧率依据物品类别与使用年限确定。",
+      "product_type": "家庭险",
+      "version": "v2022",
+      "is_expired": false
+    },
+    {
+      "id": "DOC027",
+      "title": "家庭险-管道漏水与相邻责任",
+      "content": "家庭综合险包含室内管道漏水责任；对相邻住户造成影响的赔偿按约定限额执行；设定免赔额。",
+      "product_type": "家庭险",
+      "version": "v2021",
+      "is_expired": true
+    },
+    {
+      "id": "DOC028",
+      "title": "癌症险-二次赔付恢复期与指定医院",
+      "content": "癌症险规定二次赔付的恢复期与指定医院；复诊记录需完整；赔付比例按合同约定。",
+      "product_type": "癌症险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC029",
+      "title": "住院津贴险-每日补贴与累积天数",
+      "content": "住院津贴险每日定额补贴200元，全年累计最多180天；与医疗险报销不可重复理赔。",
+      "product_type": "住院津贴险",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC030",
+      "title": "儿童投保-年龄范围与签署",
+      "content": "儿童投保年龄范围为出生满30天至17岁；需监护人签字；符合免体检条件方可投保。",
+      "product_type": "儿童险",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC031",
+      "title": "保单复效-流程与材料",
+      "content": "保单失效恢复需提交复效申请、补交保费与可能的体检；复效后等待期可能重置。",
+      "product_type": "通用条款",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC032",
+      "title": "犹豫期-退保流程与费用",
+      "content": "犹豫期为15天；退保流程需填写申请并提交身份证明与保单原件；可能扣除一定费用。",
+      "product_type": "通用条款",
+      "version": "v2022",
+      "is_expired": false
+    },
+    {
+      "id": "DOC033",
+      "title": "指定医院-清单与预约",
+      "content": "指定医院清单定期更新；预约流程需通过客服或App完成；专家门诊需提前申请。",
+      "product_type": "通用条款",
+      "version": "v2024",
+      "is_expired": false
+    },
+    {
+      "id": "DOC034",
+      "title": "报销流程-材料与时限",
+      "content": "报销流程包括索赔材料、报销时限与发票要求；票据需为税务发票原件。",
+      "product_type": "通用条款",
+      "version": "v2023",
+      "is_expired": false
+    },
+    {
+      "id": "DOC035",
+      "title": "高风险运动清单",
+      "content": "高风险运动清单包含攀岩、潜水、跳伞、赛车等；相关保障范围除外。",
+      "product_type": "通用条款",
+      "version": "v2022",
+      "is_expired": false
+    },
+    {
+      "id": "DOC036",
+      "title": "航空意外-额外赔付条件",
+      "content": "航空意外额外赔付条件：需乘坐商业航班且非包机或私人飞机；赔付细则见附录。",
+      "product_type": "通用条款",
+      "version": "v2024",
+      "is_expired": false
+    }
+  ],
+  "queries": [
+    {
+      "id": "Q001",
+      "text": "医疗险的等待期是多少？",
+      "relevant_doc_ids": ["DOC001", "DOC002"]
+    },
+    {
+      "id": "Q002",
+      "text": "既往症是否可以理赔？",
+      "relevant_doc_ids": ["DOC001", "DOC006"]
+    },
+    {
+      "id": "Q003",
+      "text": "寿险身故赔付比例如何计算？",
+      "relevant_doc_ids": ["DOC013", "DOC014"]
+    },
+    {
+      "id": "Q004",
+      "text": "门诊医疗是否覆盖、报销比例是多少？",
+      "relevant_doc_ids": ["DOC001", "DOC017"]
+    },
+    {
+      "id": "Q005",
+      "text": "住院报销比例与年度免赔额是多少？",
+      "relevant_doc_ids": ["DOC001", "DOC008"]
+    },
+    {
+      "id": "Q006",
+      "text": "境外旅游紧急医疗保障额度是多少？",
+      "relevant_doc_ids": ["DOC019", "DOC021"]
+    },
+    {
+      "id": "Q007",
+      "text": "癌症二次赔付的间隔期和条件是什么？",
+      "relevant_doc_ids": ["DOC010", "DOC028"]
+    },
+    {
+      "id": "Q008",
+      "text": "儿童投保年龄范围是多大？",
+      "relevant_doc_ids": ["DOC030", "DOC012"]
+    },
+    {
+      "id": "Q009",
+      "text": "保单失效后如何恢复？需要哪些材料？",
+      "relevant_doc_ids": ["DOC031", "DOC014"]
+    },
+    {
+      "id": "Q010",
+      "text": "犹豫期有多长？退保流程是什么？",
+      "relevant_doc_ids": ["DOC032", "DOC013"]
+    },
+    {
+      "id": "Q011",
+      "text": "指定医院范围与预约流程如何？",
+      "relevant_doc_ids": ["DOC033", "DOC001"]
+    },
+    {
+      "id": "Q012",
+      "text": "高风险运动是否在意外险保障范围内？",
+      "relevant_doc_ids": ["DOC016", "DOC035"]
+    },
+    {
+      "id": "Q013",
+      "text": "乘坐飞机发生意外是否有额外赔付？",
+      "relevant_doc_ids": ["DOC016", "DOC036"]
+    },
+    {
+      "id": "Q014",
+      "text": "住院津贴每天补贴多少？最长可以领多少天？",
+      "relevant_doc_ids": ["DOC029", "DOC005"]
+    },
+    {
+      "id": "Q015",
+      "text": "报销流程与发票要求是什么？需要哪些材料？",
+      "relevant_doc_ids": ["DOC034", "DOC003"]
+    },
+    {
+      "id": "Q016",
+      "text": "年度免赔额是多少？共同支付比例如何？",
+      "relevant_doc_ids": ["DOC008", "DOC001"]
+    },
+    {
+      "id": "Q017",
+      "text": "行李延误如何赔付？需要哪些证明？",
+      "relevant_doc_ids": ["DOC020", "DOC021"]
+    },
+    {
+      "id": "Q018",
+      "text": "车险第三者责任险保额与不计免赔如何约定？",
+      "relevant_doc_ids": ["DOC022", "DOC024"]
+    }
+  ]
+}
+

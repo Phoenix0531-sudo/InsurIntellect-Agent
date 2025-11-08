@@ -2,6 +2,23 @@
 
 基于大语言模型与向量数据库的保险文档问答系统，提供智能的保险文档分析和问答服务。
 
+## 目录
+- 项目简介与特性
+- 系统要求与安装部署
+- 环境配置与变量详解
+- 启动与运行（本地与Docker）
+- API 文档与端点详解
+- 响应模型与异常路径保证
+- 项目结构与关键模块
+- RAG 工作流与监管关联重排序
+- 使用示例与测试验证
+- 性能优化与监控日志
+- 故障排除与中文编码指南
+- 开发指南与数据库迁移
+- 部署建议与生产配置
+- 贡献指南与许可证
+- 变更日志
+
 ## 🚀 功能特性
 
 - **向量搜索**: 基于 ChromaDB/Pinecone 的语义检索
@@ -76,6 +93,36 @@ LOG_LEVEL=INFO
 ENABLE_STRUCTURED_LOGGING=true
 STRUCTURED_LOG_FILE=logs/structured.log
 ENABLE_AUTO_RESTART=false
+
+### 环境变量详解（分类与依赖）
+- LLM 与嵌入模型（兼容 OpenAI API）
+  - `OPENAI_API_KEY`：API 密钥（可使用 SiliconFlow 的密钥）
+  - `OPENAI_BASE_URL`：API 基础地址，SiliconFlow 为 `https://api.siliconflow.cn/v1`
+  - `OPENAI_MODEL`：对话/指令模型，推荐 `Qwen/Qwen2.5-7B-Instruct`
+  - `OPENAI_EMBEDDING_MODEL`：嵌入模型，如 `BAAI/bge-m3`
+  - `OPENAI_MAX_TOKENS`：生成最大 tokens（默认 1000）
+  - `OPENAI_TEMPERATURE`：采样温度（默认 0.7）
+  - 替代字段（可选）：`SILICONFLOW_API_KEY`、`SILICONFLOW_BASE_URL`（与以上字段完全兼容）
+- 向量数据库
+  - `VECTOR_DB_TYPE`：`chroma` 或 `pinecone`
+  - `CHROMA_PERSIST_DIRECTORY`：本地 ChromaDB 持久化目录
+  - `PINECONE_API_KEY`、`PINECONE_ENVIRONMENT`、`PINECONE_INDEX_NAME`：使用 Pinecone 时必需
+- 应用与日志
+  - `HOST`、`PORT`、`RELOAD`：服务监听与热重载
+  - `SECRET_KEY`：应用密钥（会话/安全相关）
+  - `DEBUG`、`LOG_LEVEL`：调试与日志等级
+  - `ENABLE_STRUCTURED_LOGGING`、`STRUCTURED_LOG_FILE`：结构化日志输出（JSON 事件）
+  - `ENABLE_AUTO_RESTART`：失败时是否自动重启（默认关闭）
+- 文档摄取与嵌入
+  - `PREPARE_ONLY`：仅生成分块，不写入向量库（可在 `ingest.py` 中使用）
+  - `REBUILD_VECTOR_DB`：重建向量库（清库后重建）
+  - `DOC_BATCH_SIZE`：批处理大小（嵌入脚本使用）
+  - `USE_LOCAL_EMBEDDINGS`：使用本地嵌入模型（离线环境）
+- OCR（Windows）
+  - `TESSERACT_CMD`：Tesseract 可执行文件路径
+  - `OCR_LANG`：语言包设置，如 `chi_sim+eng`
+- 测试与工具
+  - `BASE_URL`：测试脚本请求的基础地址（默认 `http://localhost:8000`，可在运行 `tools/test_api.py` 前设置）
 ```
 
 ### 5. 初始化数据库
@@ -115,6 +162,88 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 - `POST /api/v1/queries/history/{id}/feedback` - 提交反馈
 - `GET /api/v1/queries/statistics` - 查询统计
 - `POST /api/v1/queries/batch` - 批量查询
+
+#### 请求参数（ask）
+- `question`：字符串，必填；用户自然语言问题。
+- `query_type`：字符串，选填；`general`（默认）、`regulatory`（建议在明确监管相关的场景使用）。
+- `max_chunks`：整数，选填；用于上下文组装的最大片段数（默认 5）。
+- `top_k`：整数，选填；语义检索返回的候选数量（默认 8）。
+- `language`：字符串，选填；期望回答语言（如 `zh`）。
+- `return_sources`：布尔，选填；是否返回 `retrieved_chunks` 来源详情（默认 true）。
+
+示例：
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/queries/ask" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "question": "这份保险的保障范围是什么？",
+    "query_type": "general",
+    "max_chunks": 5,
+    "top_k": 8,
+    "return_sources": true
+  }'
+```
+
+#### 返回字段说明（更新）
+- `/api/v1/queries/ask` 响应包含：`query_id`、`question`、`answer`、`query_type`、`response_time`、`chunks_used`、`retrieved_chunks`、`confidence_score` 等。
+  - 当模型/API Key 缺失或上游失败时，仍会返回非空的 `query_id`，`answer` 为友好错误提示，`retrieved_chunks` 为空列表。
+- `/api/v1/queries/history` 响应项的 `metadata` 中包含：`rewritten_query`（查询改写结果）、`rewriting_metadata`（改写过程元数据）、`retrieved_chunks`（检索片段及相似度）。
+
+#### 响应模型详解（ask 示例）
+```json
+{
+  "query_id": 23,
+  "question": "这份保险的保障范围是什么？",
+  "answer": "该问题需要模型生成，若上游不可用则返回友好错误提示。",
+  "query_type": "general",
+  "response_time": 7.42,
+  "chunks_used": 5,
+  "retrieved_chunks": [
+    {
+      "doc_id": "policy-2024-A",
+      "chunk_id": 118,
+      "score": 0.83,
+      "content_preview": "本保险的保障范围包含住院医疗、重疾、意外...",
+      "metadata": {"effective_date": "2024-10-01", "product_type": "health"}
+    }
+  ],
+  "confidence_score": 0.76,
+  "metadata": {
+    "rewritten_query": "该保单保障范围？",
+    "rewriting_metadata": {"model": "Qwen/Qwen2.5-7B-Instruct"}
+  }
+}
+```
+
+字段要点：
+- `query_id`：持久化的查询记录主键，异常路径也保证非空（见下文）。
+- `retrieved_chunks`：返回命中的文档片段及相似度与元数据，便于追溯与可视化。
+- `metadata.rewritten_query`：在 RAG 前置步骤进行轻量改写，以提升检索质量。
+
+#### 错误与异常处理细则
+- 缺失/错误的模型 API Key：返回友好错误信息；`query_id` 非空；`retrieved_chunks` 为空；`metadata.rewritten_query` 与 `rewriting_metadata` 为空。
+- 上游模型超时/不可用：同上，记录错误上下文以便排障。
+- 嵌入维度不匹配：检索可能报错；建议检查集合维度与嵌入模型配置。
+- 向量数据库不可用：返回错误提示，`query_id` 仍持久化；建议先运行 `tools/check_db.py`。
+- 输入校验失败：返回 400 与具体字段错误；不写入历史。
+
+#### 简单验证（Smoke Test）
+```bash
+# 1) 提交查询（确保 query_id 非空）
+curl -X POST "http://127.0.0.1:8000/api/v1/queries/ask" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{"question":"测试：没有API密钥时也应返回 query_id","query_type":"general"}'
+
+# 2) 查看历史（count 增加，最近一项 metadata.* 可能为空）
+curl -X GET "http://127.0.0.1:8000/api/v1/queries/history"
+```
+
+或使用测试脚本：
+```bash
+# 可通过环境变量设置 BASE_URL（默认 http://localhost:8000）
+set BASE_URL=http://localhost:8000  # Windows PowerShell 使用 $env:BASE_URL
+python tools/test_api.py
+```
 
 ### 系统与健康（/api/v1/health, /api/v1/admin）
 
@@ -180,13 +309,21 @@ InsurIntellect_Agent/
 ├── .env.example                  # 环境变量模板
 └── README.md                     # 项目文档
 
+### 关键模块职责
+- `app/core/rag_workflow.py`：RAG 处理管线（改写、检索、重排、组装、生成）。
+- `app/services/query_service.py`：查询问答服务，负责端到端处理与异常路径持久化。
+- `app/services/vector_store.py`：向量库封装与检索接口。
+- `app/services/llm_service.py`：模型调用封装（兼容 OpenAI API）。
+- `app/models/schemas.py`：Pydantic 请求/响应模型定义。
+- `app/core/structured_logger.py`：结构化日志记录与事件埋点。
+
 ## 🔍 使用示例
 
 ### 1. 智能问答
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/v1/queries/ask" \
-  -H "Content-Type: application/json" \
+  -H "Content-Type: application/json; charset=utf-8" \
   -d '{
     "question": "这份保险的保障范围是什么？",
     "query_type": "general",
@@ -219,6 +356,23 @@ curl -X POST "http://127.0.0.1:8000/api/v1/queries/ask" \
 
 - 在检索阶段（RAG 第 2 步）后执行“2.5 监管感知重排序”。
 - 在评审选择（第 3 步）后，最终上下文组装前再次按“监管关联优先 + 时效性”排序。
+
+## 🧠 RAG 工作流详解
+- 第 0 步：预处理与嵌入（离线）
+  - 文档分块（`scripts/embed_chunks.py` / `ingest.py`）
+  - 生成嵌入并写入向量库（Chroma/Pinecone）
+- 第 1 步：查询理解与改写
+  - 轻量改写（`metadata.rewritten_query`）以提升召回与相关性
+- 第 2 步：语义检索
+  - 基于向量相似度返回候选片段（`retrieved_chunks`）
+- 第 2.5 步：监管关联重排序
+  - 对监管相关且与查询高度关联的文档施加固定加分，结合时效性重排
+- 第 3 步：上下文选择与组装
+  - 基于分数/覆盖度选择 `chunks_used` 个片段，组装上下文
+- 第 4 步：答案生成
+  - 使用指令模型生成回答与引用说明（若启用）
+- 第 5 步：后处理与持久化
+  - 记录耗时、置信度、来源片段与查询历史（异常路径亦持久化）
 
 ### 2. 获取查询详情
 
@@ -308,6 +462,20 @@ tesseract --version
 - `base_url` 为 `https://api.siliconflow.cn/v1`
 - `api_key` 为您的硅基流动API密钥
 - `model` 为硅基流动支持的模型名称
+
+## 🧪 测试与验证
+
+### 快速运行
+```bash
+# 运行所有 API 端点测试（自动包含 query_id 异常路径保证与历史增长自检）
+python tools/test_api.py
+```
+
+### 测试细节
+- 新增自检：
+  - `ask` 在异常路径（模型/API Key 不可用）也返回非空 `query_id`
+  - 历史列表在 `ask` 后计数增加，并能找到对应 `query_id`
+- 可配置：通过 `BASE_URL` 环境变量修改测试目标（默认 `http://localhost:8000`）
 
 ## 🧪 测试
 
@@ -472,6 +640,27 @@ $env:REBUILD_VECTOR_DB = "1"; python ingest.py
 2. **向量数据库连接失败**: 验证配置和服务状态
 3. **内存不足**: 调整批处理大小和并发数
 
+### 异常路径与 query_id 保证
+- 为了便于问题追踪与反馈统计，系统在异常路径也会持久化查询历史并返回非空的 `query_id`。
+- 当模型/API Key 缺失或上游调用失败时：
+  - `/api/v1/queries/ask` 的 `answer` 为友好错误提示，`retrieved_chunks` 为空列表，`query_id` 仍非空；
+  - `/api/v1/queries/history` 中对应项的 `metadata.rewritten_query` 与 `metadata.rewriting_metadata` 为空，`metadata.retrieved_chunks` 为空列表。
+- 如出现 `query_id = null`：请确认更新至最新代码版本并检查服务日志是否存在未捕获异常；必要时重启服务。
+
+### 编码与本地化（深入指南）
+- 推荐统一 `UTF-8`：服务端与客户端均应设置 `charset=utf-8`。
+- Windows PowerShell：
+  - `chcp 65001` 切换到 UTF-8 代码页（必要时）
+  - `$env:PYTHONIOENCODING = "utf-8"` 保证 Python 输出编码一致
+- 前端：确保 `index.html` 使用 `<meta charset="utf-8">`，后端响应头为 `application/json; charset=utf-8`。
+
+### 中文乱码显示排查
+- API 客户端与服务端应统一为 UTF-8：将请求头设置为 `Content-Type: application/json; charset=utf-8`。
+- 在 Windows PowerShell 终端中，建议执行：
+  - `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`
+  - 使用 `Invoke-RestMethod` 时显式设置 `-ContentType 'application/json; charset=utf-8'`
+- FastAPI 默认使用 UTF-8 编码；若前端页面出现乱码，请确认 `static/index.html` 包含 `<meta charset="utf-8">`。
+
 ### 日志查看
 
 ```bash
@@ -502,6 +691,11 @@ tail -f logs/error.log
 3. **缓存策略**: 启用查询结果缓存
 4. **并发处理**: 配置合适的worker数量
 
+## 🛠 监控与日志
+- 健康端点：`/api/v1/health/live`、`/api/v1/health/ready`、`/api/v1/health/model`
+- 结构化日志：启用后以 JSON 事件记录关键动作（请求、错误、性能）
+- 日志轮转：建议生产环境配置按大小或按日轮转（Nginx/系统级工具）
+
 ## 🤝 贡献指南
 
 1. Fork项目
@@ -509,7 +703,13 @@ tail -f logs/error.log
 3. 提交更改
 4. 创建Pull Request
 
-## 📄 许可证
+## � 变更日志
+- 2025-11-08
+  - `query_service.process_query` 异常路径持久化查询历史并保证返回非空 `query_id`
+  - `tools/test_api.py` 增加 `query_id` 与历史增长自检，支持 `BASE_URL` 环境变量
+  - README 扩展：响应模型详解、RAG 工作流、环境变量分类与编码指南
+
+## �📄 许可证
 
 本项目采用MIT许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
@@ -525,26 +725,6 @@ tail -f logs/error.log
 ---
 
 **InsurIntellect Agent** - 让保险文档问答更智能！
-
-## 项目概述
-
-InsurIntellect Agent 是一个智能保险文档问答系统，利用大语言模型和向量数据库技术，为用户提供准确、高效的保险文档查询和问答服务。
-
-## 功能特性
-
-- 📄 PDF文档自动解析和预处理
-- 🔍 基于向量相似度的智能检索
-- 🤖 大语言模型驱动的问答生成
-- 🚀 RESTful API接口
-- 📊 查询历史和性能监控
-- 🔧 灵活的配置管理
-
-## 技术栈
-
-- **后端框架**: FastAPI
-- **向量数据库**: ChromaDB / Pinecone
-- **嵌入模型**: OpenAI Embeddings / Sentence Transformers
-- **大语言模型**: OpenAI GPT / 其他兼容模型
 - **数据库**: SQLite / PostgreSQL
 - **部署**: Docker, Uvicorn
 

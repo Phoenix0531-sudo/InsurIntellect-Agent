@@ -1,4 +1,4 @@
-﻿"""
+"""
 管理员API端点
 """
 
@@ -231,11 +231,11 @@ async def system_cleanup(
                 cutoff_date = datetime.utcnow() - timedelta(days=days_to_keep)
                 
                 old_queries = db.query(QueryHistory).filter(
-                    QueryHistory.created_at < cutoff_date
+                    QueryHistory.created_time < cutoff_date
                 ).count()
                 
                 db.query(QueryHistory).filter(
-                    QueryHistory.created_at < cutoff_date
+                    QueryHistory.created_time < cutoff_date
                 ).delete()
                 
                 db.commit()
@@ -330,52 +330,52 @@ async def get_query_analytics(
         
         # 基础统计
         total_queries = db.query(QueryHistory).filter(
-            QueryHistory.created_at >= start_date
+            QueryHistory.created_time >= start_date
         ).count()
         
         avg_response_time = db.query(func.avg(QueryHistory.response_time)).filter(
-            QueryHistory.created_at >= start_date
+            QueryHistory.created_time >= start_date
         ).scalar() or 0
         
         # 按查询类型统计
         type_stats = db.query(
-            QueryHistory.query_type,
+            QueryHistory.model_used,
             func.count(QueryHistory.id),
             func.avg(QueryHistory.response_time)
         ).filter(
-            QueryHistory.created_at >= start_date
-        ).group_by(QueryHistory.query_type).all()
+            QueryHistory.created_time >= start_date
+        ).group_by(QueryHistory.model_used).all()
         
         # 用户满意度统计
         feedback_stats = db.query(
-            QueryHistory.feedback_rating,
+            QueryHistory.rating,
             func.count(QueryHistory.id)
         ).filter(
-            QueryHistory.created_at >= start_date,
-            QueryHistory.feedback_rating.isnot(None)
-        ).group_by(QueryHistory.feedback_rating).all()
+            QueryHistory.created_time >= start_date,
+            QueryHistory.rating.isnot(None)
+        ).group_by(QueryHistory.rating).all()
         
-        avg_rating = db.query(func.avg(QueryHistory.feedback_rating)).filter(
-            QueryHistory.created_at >= start_date,
-            QueryHistory.feedback_rating.isnot(None)
+        avg_rating = db.query(func.avg(QueryHistory.rating)).filter(
+            QueryHistory.created_time >= start_date,
+            QueryHistory.rating.isnot(None)
         ).scalar() or 0
         
         # 每日查询量统计
         daily_stats = db.query(
-            func.date(QueryHistory.created_at).label('date'),
+            func.date(QueryHistory.created_time).label('date'),
             func.count(QueryHistory.id).label('count'),
             func.avg(QueryHistory.response_time).label('avg_time')
         ).filter(
-            QueryHistory.created_at >= start_date
-        ).group_by(func.date(QueryHistory.created_at)).all()
+            QueryHistory.created_time >= start_date
+        ).group_by(func.date(QueryHistory.created_time)).all()
         
         # 最常见的查询
         common_queries = db.query(
-            QueryHistory.question,
+            QueryHistory.query,
             func.count(QueryHistory.id).label('frequency')
         ).filter(
-            QueryHistory.created_at >= start_date
-        ).group_by(QueryHistory.question).order_by(
+            QueryHistory.created_time >= start_date
+        ).group_by(QueryHistory.query).order_by(
             desc('frequency')
         ).limit(10).all()
         

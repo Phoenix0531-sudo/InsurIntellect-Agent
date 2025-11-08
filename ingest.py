@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import shutil
 import hashlib
+import asyncio
 
 # LangChain imports
 from langchain_community.document_loaders import PyPDFLoader
@@ -39,6 +40,8 @@ from app.core.config import settings
 from app.prompts import DIGITAL_ARCHIVIST_PROMPT
 from app.core.chromadb_manager import chroma_manager
 from app.core.app_logging import get_logger as _get_logger
+from app.services.document_parser_service import DocumentParserService
+from app.services.llm_service import LLMService
 
 # OCR imports
 import fitz  # PyMuPDF
@@ -310,93 +313,29 @@ def main():
             img = img.convert("RGB")
         return img
 
-    def extract_text_pages_with_ocr(file_path: Path, force_ocr: bool, ocr_lang: str) -> List[Dict[str, Any]]:
-        """优先使用 pdfplumber/PyPDF2 提取文本；不足时回退到 OCR。
-        返回每页的 {text, page_number, method} 列表。
-        """
-        pages: List[Dict[str, Any]] = []
-        # 若强制 OCR，则跳过文本提取直接 OCR
-        if force_ocr:
-            try:
-                doc = fitz.open(str(file_path))
-                for i, page in enumerate(doc, start=1):
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-                    img = _page_pixmap_to_image(pix)
-                    text = pytesseract.image_to_string(img, lang=ocr_lang)
-                    text = (text or "").strip()
-                    if text:
-                        pages.append({"text": text, "page_number": i, "method": "ocr"})
-            except Exception as e:
-                logger.error(f"强制 OCR 失败: {e}")
-            return pages
-
-        # 1) 先用 pdfplumber 提取
-        try:
-            import pdfplumber
-            with pdfplumber.open(str(file_path)) as pdf:
-                for i, page in enumerate(pdf.pages, start=1):
-                    txt = page.extract_text() or ""
-                    if txt.strip():
-                        pages.append({"text": txt.strip(), "page_number": i, "method": "pdfplumber"})
-        except Exception as e:
-            logger.warning(f"pdfplumber 提取失败,转为 PyPDF2: {e}")
-
-        # 2) 若为空或文本密度过低,尝试使用 PyPDF2
-        if not pages:
-            try:
-                import PyPDF2
-                with open(str(file_path), "rb") as f:
-                    reader = PyPDF2.PdfReader(f)
-                    for i, page in enumerate(reader.pages, start=1):
-                        txt = page.extract_text() or ""
-                        if txt.strip():
-                            pages.append({"text": txt.strip(), "page_number": i, "method": "pypdf2"})
-            except Exception as e:
-                logger.warning(f"PyPDF2 提取失败: {e}")
-
-        # 3) 评估文本密度,若不足则对每页进行 OCR
-        # 简单策略:若前两步总字符数 < 200 或空,则触发 OCR
-        char_count = sum(len(p["text"]) for p in pages)
-        need_ocr = (char_count < 200)
-        ocr_results: List[Dict[str, Any]] = []
-        if need_ocr:
-            try:
-                doc = fitz.open(str(file_path))
-                for i, page in enumerate(doc, start=1):
-                    # 高分辨率渲染以提升 OCR 准确度
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-                    img = _page_pixmap_to_image(pix)
-                    text = pytesseract.image_to_string(img, lang=ocr_lang)
-                    text = (text or "").strip()
-                    if text:
-                        ocr_results.append({"text": text, "page_number": i, "method": "ocr"})
-                # 若 OCR 有结果，则覆盖 pages
-                if ocr_results:
-                    pages = ocr_results
-            except Exception as e:
-                logger.error(f"OCR 回退失败: {e}")
-
-        return pages
-
-    def load_documents_from_pdf(pdf_file: Path, force_ocr: bool, ocr_lang: str) -> List[Document]:
-        """使用 OCR 支持的方式加载 PDF 为 LangChain Document 列表（每页一个）"""
+    # 使用布局解析服务替代传统提取与 OCR 回退
+    def parse_documents_with_layout(pdf_file: Path,
+                                    source_group: str,
+                                    document_type: str,
+                                    parser_cfg: Dict[str, Any]) -> List[Document]:
+        """基于 DocumentParserService 的布局感知解析，返回语义保留块。"""
         nonlocal total_pages, ocr_pages
-        pages = extract_text_pages_with_ocr(pdf_file, force_ocr=force_ocr, ocr_lang=ocr_lang)
-        total_pages += len(pages)
-        ocr_pages += sum(1 for p in pages if p.get("method") == "ocr")
-        docs: List[Document] = []
-        for p in pages:
-            docs.append(
-                Document(
-                    page_content=p["text"],
-                    metadata={
-                        "source_file": pdf_file.name,
-                        "file_path": str(pdf_file),
-                        "page_number": p["page_number"],
-                        "extraction_method": p.get("method", "unknown"),
-                    },
-                )
-            )
+        strategy = (parser_cfg.get("strategy") or general.get("parser", {}).get("strategy") or "hi_res")
+        ocr_lang = general.get("parser", {}).get("ocr_languages", OCR_LANG)
+        token_chunk_target = int(general.get("parser", {}).get("token_chunk_target", 512))
+        token_chunk_max = int(general.get("parser", {}).get("token_chunk_max", 1024))
+        chunk_overlap = int(general.get("parser", {}).get("chunk_overlap", 64))
+        service = DocumentParserService(
+            strategy=str(strategy),
+            ocr_languages=str(ocr_lang),
+            infer_table_structure=True,
+            token_chunk_target=token_chunk_target,
+            token_chunk_max=token_chunk_max,
+            chunk_overlap=chunk_overlap,
+        )
+        docs = service.parse_pdf_to_chunks(pdf_file, source_group=source_group, document_type=document_type)
+        # 估算页数与 OCR 页（hi_res 内部按需 OCR，无法逐页统计，此处保留总数估计）
+        total_pages += 1  # 以文件粒度累加，用于指标展示（避免误导性统计）
         return docs
     
     # 遍历分组及其文件
@@ -450,22 +389,27 @@ def main():
                     selected_chunk_cfg = profiles_cfg.get("tables", {}).get("chunk", selected_chunk_cfg)
                     selected_dedup_cfg = profiles_cfg.get("tables", {}).get("dedup", selected_dedup_cfg)
 
-                # 加载文档
-                force_ocr_sel = bool(selected_ocr_cfg.get("enabled", False))
-                ocr_lang_sel = str(selected_ocr_cfg.get("lang", general.get("ocr", {}).get("lang", OCR_LANG)))
-                documents = load_documents_from_pdf(pdf_file, force_ocr=force_ocr_sel, ocr_lang=ocr_lang_sel)
+                # 解析文档（布局感知）
+                parser_cfg = selected_chunk_cfg if isinstance(selected_chunk_cfg, dict) else {}
+                documents = parse_documents_with_layout(
+                    pdf_file,
+                    source_group=selected_group,
+                    document_type=selected_doc_type,
+                    parser_cfg=profiles_cfg.get(selected_group, {}).get("parser", {})
+                    if profiles_cfg else {}
+                )
                 if not documents:
-                    logger.warning(f"文件 {pdf_file.name} 加载失败或为空")
+                    logger.warning(f"文件 {pdf_file.name} 解析失败或为空")
                     continue
 
-                # 取第一页文本作为摘要,用于 AI 元数据提取
-                first_page_text = documents[0].page_content[:2000]
+                # 取第一块文本作为摘要，用于 AI 元数据提取（跳过表格块）
+                first_text_block = next((d for d in documents if d.page_content and not d.metadata.get("table_json_schema")), None)
+                first_page_text = (first_text_block.page_content if first_text_block else documents[0].page_content)[:2000]
                 ai_metadata = get_metadata_from_ai(first_page_text)
 
-                # 建立分块器（按分类的配置）
-                splitter_for_file = _build_text_splitter(selected_chunk_cfg)
-                document_chunks = splitter_for_file.split_documents(documents)
-                logger.info(f"文件 {pdf_file.name} 被分割为 {len(document_chunks)} 个块")
+                # 已由布局服务进行一级边界与二级 token 分割，此处不再使用传统 splitter
+                document_chunks = documents
+                logger.info(f"文件 {pdf_file.name} 解析为 {len(document_chunks)} 个语义块")
 
                 # 去重（按分类配置）
                 filtered_chunks = []
@@ -487,7 +431,7 @@ def main():
                     document_chunks = filtered_chunks
                     logger.info(f"去重后块数: {len(document_chunks)}")
 
-                # 添加元数据
+                # 添加/合并元数据（AI 元数据 + 现有）
                 for chunk in document_chunks:
                     chunk.metadata.update({
                         "source_file": pdf_file.name,
@@ -505,8 +449,32 @@ def main():
     if not all_documents:
         logger.error("没有成功处理任何文档")
         return
-    
+
     logger.info(f"总共处理了 {len(all_documents)} 个文档块")
+
+    # 关键词抽取（轻量级、异步、失败不阻塞）
+    enable_keywords = os.getenv("ENABLE_KEYWORDS", "1") == "1"
+    if enable_keywords:
+        logger.info("开始异步关键词抽取（不阻塞，失败忽略）...")
+        async def _extract_keywords_for_docs(docs: List[Document], max_keywords: int = 8, timeout_s: float = 8.0, concurrency: int = 6):
+            llm = LLMService()
+            sem = asyncio.Semaphore(concurrency)
+            async def _one(doc: Document):
+                text = doc.page_content[:2000]
+                try:
+                    async with sem:
+                        kws = await asyncio.wait_for(llm.extract_keywords(text, max_keywords=max_keywords), timeout=timeout_s)
+                        doc.metadata["keywords_json"] = kws
+                except Exception:
+                    # 失败情况下不写入或写入空数组
+                    doc.metadata.setdefault("keywords_json", [])
+            await asyncio.gather(*[_one(d) for d in docs], return_exceptions=True)
+
+        try:
+            asyncio.run(_extract_keywords_for_docs(all_documents))
+            logger.info("关键词抽取阶段已完成（部分失败已忽略）")
+        except Exception as e:
+            logger.warning(f"关键词抽取阶段出现问题（已忽略，不影响摄取）: {e}")
     
     # 仅准备模式:导出分割/去重后的块与元数据为 JSONL
     prepare_only = os.getenv("PREPARE_ONLY", "0") == "1"

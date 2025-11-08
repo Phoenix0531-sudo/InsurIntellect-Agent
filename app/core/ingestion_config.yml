@@ -8,6 +8,15 @@ general:
   write_mode: "append"
   batch_size: 32
   embedding_model: ""
+  parser:
+    engine: "unstructured"
+    strategy: "hi_res"
+    ocr_languages: "chi_sim+eng"
+    infer_table_structure: true
+    token_chunk_target: 512
+    token_chunk_max: 1024
+    chunk_overlap: 64
+    include_table_json: true
   ocr:
     enabled_default: false
     lang: "chi_sim+eng"
@@ -43,6 +52,8 @@ classification:
 profiles:
   terms:
     document_type: "条款"
+    parser:
+      strategy: "hi_res"
     ocr:
       enabled: false
       lang: "chi_sim+eng"
@@ -58,6 +69,8 @@ profiles:
 
   manuals:
     document_type: "说明书"
+    parser:
+      strategy: "hi_res"
     ocr:
       enabled: false
       lang: "chi_sim+eng"
@@ -73,6 +86,8 @@ profiles:
 
   tables:
     document_type: "费率/利益"
+    parser:
+      strategy: "hi_res"
     ocr:
       enabled: false
       lang: "chi_sim+eng"

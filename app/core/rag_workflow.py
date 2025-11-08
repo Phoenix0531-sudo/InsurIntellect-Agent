@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 InsurIntellect Agent - RAG Workflow Engine
 =========================================
@@ -141,6 +141,9 @@ class InsurIntellectAgent:
                 except Exception as e2:
                     logger.warning(f"缓存监管文件失败: {e2}")
                     self.regulatory_docs = {}
+
+            # 最近一次运行的检索与排序详情（用于审计与持久化）
+            self.last_run: Dict[str, Any] = {}
 
         except Exception as e:
             logger.exception("初始化InsurIntellect智能代理失败")
@@ -322,37 +325,10 @@ class InsurIntellectAgent:
 
     def _regulatory_rerank(self, user_query: str, candidates: List[Document]) -> List[Document]:
         """
-        对候选文档进行监管感知重排序：
-        - 若查询为监管相关，则对与查询高度关联的产品文档给予固定加分
-        - 仅改变候选文档顺序，不修改内容
+        已废弃：攻关任务四采用全新业务规则（线性加权 + 阶跃时效 + ESG 加分）。
+        为保持兼容性，此方法不再更改候选顺序，直接返回原列表。
         """
-        if not settings.ENABLE_REGULATORY_RERANK:
-            return candidates
-        try:
-            if not candidates:
-                return candidates
-            is_reg = self._is_regulatory_query(user_query)
-            if not is_reg:
-                return candidates
-            logger.info("检测到监管相关查询，执行监管感知重排序（固定加分）")
-            scored: List[tuple] = []
-            for doc in candidates:
-                boost = 0.0
-                if self._is_product_document(doc):
-                    try:
-                        associated = self._is_associated_with_regulatory_query(user_query, doc)
-                    except Exception:
-                        associated = False
-                    if associated:
-                        boost = settings.REGULATORY_FIXED_BOOST
-                scored.append((boost, doc))
-            # 按加分倒序排序，保持稳定性
-            scored.sort(key=lambda x: x[0], reverse=True)
-            reranked = [d for _, d in scored]
-            return reranked
-        except Exception as e:
-            logger.error(f"监管感知重排序失败：{e}")
-            return candidates
+        return candidates
 
     def run_report_author(self, user_query: str, context: str) -> str:
         """
@@ -385,59 +361,149 @@ class InsurIntellectAgent:
             logger.exception("报告撰写人执行失败")
             return f"抱歉,在生成答案时遇到了问题:{str(e)}"
 
-    # 新增：动态排序主函数（监管规则驱动 + AI赋能）
+    # 新增：动态排序主函数（攻关任务四规则）
     def _dynamic_ranking(self, docs: List[Document], query: str) -> List[Document]:
         """
-        执行多维度的动态排序，综合考虑相关性、时效性和AI驱动的监管对齐。
-
-        逻辑说明：
-        - 先用 AI 判断查询是否为监管相关（_is_query_regulatory）。
-        - 对每个文档计算：基础分 + 时效性分*权重 + 监管对齐加分。
-        - 最终按得分降序排序，返回文档列表。
+        使用批准的业务规则进行动态排序：
+        final_score = (W_orig * similarity) + (W_biz * business_score)
+        business_score = timeliness_boost + compliance_boost
+        规则：
+        - timeliness_boost: 若 (today - effective_date) <= 180 天，则 +0.3，否则 0.0
+        - compliance_boost: 文档含有 ESG 关键词（RERANK_COMPLIANCE_KEYWORDS）则 +0.1
+        - expired: 若 expiry_date <= today，则 final_score *= 0.5
+        - abolition: 若 abolition_date <= today，则剔除该文档块
+        - 不进行 min-max 归一化；相似度为 [0,1] 的语义相似度
+        - 应用 SIMILARITY_THRESHOLD 初筛
         """
 
-        # 步骤1：使用AI判断查询是否与监管相关
-        is_regulatory_query = self._is_query_regulatory(query)
+        def _parse_date(d: Any) -> Any:
+            if not d:
+                return None
+            s = str(d).strip()
+            if not s or s in ("未知", "unknown"):
+                return None
+            for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    from datetime import datetime as _dt
+                    return _dt.strptime(s, fmt)
+                except Exception:
+                    continue
+            return None
 
-        ranked_docs_with_scores: List[tuple] = []
+        def _within_recent_180(metadata: Dict[str, Any]) -> bool:
+            from datetime import datetime as _dt
+            today = _dt.now()
+            candidates = [metadata.get("effective_date"), metadata.get("publish_date"), metadata.get("last_updated_date")]
+            latest = None
+            for d in candidates:
+                dt = _parse_date(d)
+                if dt and (latest is None or dt > latest):
+                    latest = dt
+            if not latest:
+                return False
+            return (today - latest).days <= 180
 
-        # 使用规则引擎：根据元数据与制度文本原则计算时效性分数（0~100）
-        def get_timeliness(metadata: Dict[str, Any]) -> float:
+        def _has_esg(doc: Document) -> bool:
+            md = doc.metadata or {}
+            # keywords_json 可以是JSON字符串或列表
+            kws = md.get("keywords_json")
+            keywords: List[str] = []
             try:
-                return compute_timeliness_score(metadata)
+                if isinstance(kws, str):
+                    import json as _json
+                    keywords = [str(x).lower() for x in (_json.loads(kws) or [])]
+                elif isinstance(kws, list):
+                    keywords = [str(x).lower() for x in kws]
+            except Exception:
+                keywords = []
+            content = (doc.page_content or "").lower()
+            for kw in settings.RERANK_COMPLIANCE_KEYWORDS:
+                k = kw.lower()
+                if k in keywords or k in content:
+                    return True
+            return False
+
+        def _expired_penalty_factor(metadata: Dict[str, Any]) -> float:
+            from datetime import datetime as _dt
+            today = _dt.now()
+            # 常见键名兼容
+            expiry_keys = ["expiry_date", "expire_date", "expiration_date", "valid_to"]
+            for k in expiry_keys:
+                dt = _parse_date(metadata.get(k))
+                if dt and dt <= today:
+                    return settings.RERANK_EXPIRED_PENALTY
+            return 1.0
+
+        def _is_abolished(metadata: Dict[str, Any]) -> bool:
+            from datetime import datetime as _dt
+            today = _dt.now()
+            abolish_keys = ["abolition_date", "abolished_date", "repealed_date"]
+            for k in abolish_keys:
+                dt = _parse_date(metadata.get(k))
+                if dt and dt <= today:
+                    return True
+            # 兼容布尔标记
+            if str(metadata.get("is_abolished", "")).strip().lower() in ("true", "1", "yes"):
+                return True
+            return False
+
+        def _similarity(query_text: str, doc_text: str) -> float:
+            try:
+                qv = self.embeddings.embed_query(query_text)
+                dv = self.embeddings.embed_documents([doc_text or ""])[0]
+                # 余弦相似度 -> [0,1]
+                import math
+                dot = sum(a * b for a, b in zip(qv, dv))
+                # 防御性：避免数值溢出
+                cos = max(min(dot, 1.0), -1.0)
+                return (cos + 1.0) / 2.0
             except Exception:
                 return 0.0
 
-        # 步骤2：逐文档计算得分并累计
+        scored: List[tuple] = []
         for doc in docs:
-            metadata = doc.metadata or {}
+            md = doc.metadata or {}
 
-            # 1. 基础分：初始相关性分，这里设为1.0
-            base_score = 1.0
+            sim = _similarity(query, doc.page_content or "")
+            if sim < settings.SIMILARITY_THRESHOLD:
+                continue  # 初筛过滤掉语义相关度极低的
 
-            # 2. 时效性得分：规则引擎（0~100），由配置进行整体权重缩放
-            timeliness_score = get_timeliness(metadata)
+            if _is_abolished(md):
+                # 废止直接剔除
+                continue
 
-            # 3. 监管对齐加分
-            regulatory_boost = 0.0
-            if is_regulatory_query:
-                # 如果是监管相关查询，则进一步判断当前文档是否与该查询高度关联
-                try:
-                    if self._is_doc_related_to_regulatory_query(doc, query):
-                        regulatory_boost = 100.0  # 给予巨大的权重加分
-                except Exception as e:
-                    logger.warning(f"监管对齐加分评估失败，忽略加分: {e}")
+            timeliness_boost = settings.RERANK_RECENCY_BOOST if _within_recent_180(md) else 0.0
+            compliance_boost = settings.RERANK_COMPLIANCE_BOOST_SCORE if _has_esg(doc) else 0.0
+            business_score = timeliness_boost + compliance_boost
 
-            # 4. 计算最终得分：基础分 + 时效性分*权重 + 监管加分
-            final_score = base_score + (timeliness_score * settings.TIMELINESS_WEIGHT) + regulatory_boost
+            final_score = (settings.RERANK_ORIG_WEIGHT * sim) + (settings.RERANK_BIZ_WEIGHT * business_score)
+            penalty = _expired_penalty_factor(md)
+            final_score *= penalty
 
-            ranked_docs_with_scores.append((doc, final_score))
+            # 写入审计字段
+            details = {
+                "original_similarity": round(sim, 6),
+                "timeliness_boost": round(timeliness_boost, 6),
+                "compliance_boost": round(compliance_boost, 6),
+                "business_score": round(business_score, 6),
+                "expired_penalty": round(penalty if penalty != 1.0 else 0.0, 6),
+                "final_score": round(final_score, 6),
+            }
+            try:
+                doc.metadata = md  # 确保可写
+                doc.metadata.setdefault("ranking_details", details)
+                # 若已有，则更新为当前计算结果
+                doc.metadata["ranking_details"] = details
+            except Exception:
+                pass
 
-        # 按最终得分进行降序排序
-        sorted_docs_with_scores = sorted(ranked_docs_with_scores, key=lambda x: x[1], reverse=True)
+            scored.append((final_score, doc))
 
-        # 只返回排序后的文档对象
-        return [doc for doc, score in sorted_docs_with_scores]
+        # 按最终分倒序
+        scored.sort(key=lambda x: x[0], reverse=True)
+        ranked_docs = [d for _, d in scored]
+        # Top-K 截断
+        return ranked_docs[: settings.MAX_RETRIEVED_CHUNKS]
 
     # 新增：AI辅助方法——判断查询是否与监管高度相关
     def _is_query_regulatory(self, query: str) -> bool:
@@ -510,9 +576,6 @@ class InsurIntellectAgent:
             
             logger.info(f"初步检索到 {len(retrieved_docs)} 个文档")
             
-            # 步骤2.5：监管感知重排序（如启用且为监管相关查询）
-            retrieved_docs = self._regulatory_rerank(user_query, retrieved_docs)
-
             # 步骤3: 首席评审员筛选最相关文档
             selected_docs = self.run_lead_reviewer(user_query, retrieved_docs)
             
@@ -524,9 +587,12 @@ class InsurIntellectAgent:
             logger.info("整理上下文信息并进行动态排序（监管规则 + AI加权）...")
             sorted_docs = self._dynamic_ranking(selected_docs, standalone_query)
 
+            # Top-K（已在 _dynamic_ranking 中截断，这里保持一致）
+            top_docs = sorted_docs[: settings.MAX_RETRIEVED_CHUNKS]
+
             # 构建上下文字符串
             context_parts = []
-            for i, doc in enumerate(sorted_docs, 1):
+            for i, doc in enumerate(top_docs, 1):
                 metadata_info = []
                 if doc.metadata.get('document_title'):
                     metadata_info.append(f"文档标题: {doc.metadata['document_title']}")
@@ -542,6 +608,39 @@ class InsurIntellectAgent:
                 context_parts.append(f"【相关文档{i}】\n{metadata_str}\n内容: {doc.page_content}\n")
             
             final_context = "\n".join(context_parts)
+
+            # 审计输出：记录检索与排序详情，用于 QueryHistory 持久化
+            try:
+                retrieved_chunks = []
+                for doc in top_docs:
+                    md = doc.metadata or {}
+                    rd = md.get("ranking_details", {})
+                    retrieved_chunks.append({
+                        "chunk_id": md.get("chunk_id"),
+                        "document_id": md.get("document_id"),
+                        "document_name": md.get("document_title") or md.get("filename") or md.get("source"),
+                        "content": doc.page_content,
+                        "page_number": md.get("page_number"),
+                        "similarity_score": rd.get("original_similarity"),
+                        "metadata": {
+                            "ranking_details": rd,
+                            "document_type": md.get("document_type"),
+                            "product_name": md.get("product_name"),
+                            "effective_date": md.get("effective_date"),
+                            "expiry_date": md.get("expiry_date"),
+                            "abolition_date": md.get("abolition_date"),
+                            "keywords_json": md.get("keywords_json"),
+                        },
+                    })
+                self.last_run = {
+                    "rewritten_query": rewritten_query,
+                    "retrieved_chunks": retrieved_chunks,
+                }
+            except Exception:
+                self.last_run = {
+                    "rewritten_query": rewritten_query,
+                    "retrieved_chunks": [],
+                }
             
             # 步骤5: 报告撰写人生成最终答案
             final_answer = self.run_report_author(user_query, final_context)

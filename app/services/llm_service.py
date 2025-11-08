@@ -3,7 +3,7 @@
 负责与LLM的交互和问答生成
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI
 import time
 from app.core.config import settings
@@ -229,4 +229,111 @@ class LLMService:
         except Exception as e:
             logger.error(f"LLM 服务健康检查失败: {e}")
             return False
+
+    async def rewrite_query(
+        self,
+        user_query: str,
+        ontology: Dict[str, Any],
+        max_output_tokens: int = 256,
+        temperature: float = 0.2,
+    ) -> Dict[str, Any]:
+        """口语化查询重写：将用户原始问题转换为专业的、语义更丰富的检索查询。
+
+        输入：用户原始查询与保险术语本体库（JSON结构）
+        输出：字典，包含 rewritten_query、intent_tags、keywords、constraints 等字段
+        失败时返回 success=False 并提供错误信息。
+        """
+        try:
+            # 将本体库压缩为有限长度的字符串，避免超长提示
+            import json as _json
+            ontology_text = _json.dumps(ontology, ensure_ascii=False)
+            if len(ontology_text) > 4000:
+                ontology_text = ontology_text[:4000] + "..."
+
+            system_prompt = (
+                "你是保险查询重写专家。你的任务：基于保险术语本体库，将用户口语化问题重写为专业、语义丰富的检索查询。"
+                "要求：\n"
+                "- 使用术语同义词与标准化名称（本体库提供）\n"
+                "- 明确产品类型、保障责任、限制条件与关键数字\n"
+                "- 保持中文，避免增加未给出的新事实\n"
+                "- 输出JSON结构，字段：rewritten_query、intent_tags、keywords、constraints\n"
+            )
+
+            user_content = (
+                f"保险术语本体库（片段）：\n{ontology_text}\n\n"
+                f"用户原始问题：\n{user_query}\n\n"
+                "请重写为用于向量检索的专业查询，并返回如下JSON：\n"
+                "{\n"
+                "  \"rewritten_query\": \"...\",\n"
+                "  \"intent_tags\": [\"产品类型\", \"保障责任\", \"条款/限制\"],\n"
+                "  \"keywords\": [\"标准术语或关键短语\"],\n"
+                "  \"constraints\": {\"等待期\": \"30天\", \"免赔额\": \"1000元\"}\n"
+                "}"
+            )
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ]
+
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=max_output_tokens,
+                temperature=temperature,
+            )
+
+            content = response.choices[0].message.content.strip()
+            # 尝试抽取JSON
+            import json as _json2
+            parsed: Optional[Dict[str, Any]] = None
+            try:
+                if "```json" in content:
+                    start = content.find("```json") + 7
+                    end = content.find("```", start)
+                    if end != -1:
+                        content = content[start:end].strip()
+                elif content.startswith("{"):
+                    pass
+                parsed = _json2.loads(content)
+            except Exception:
+                # 尝试第二种方式：提取第一段以 { 开头的块
+                l = content.find("{")
+                r = content.rfind("}")
+                if l != -1 and r != -1 and r > l:
+                    try:
+                        parsed = _json2.loads(content[l : r + 1])
+                    except Exception:
+                        parsed = None
+
+            if not isinstance(parsed, dict):
+                logger.warning("重写结果解析失败，回退到原始查询")
+                return {
+                    "rewritten_query": user_query,
+                    "intent_tags": [],
+                    "keywords": [],
+                    "constraints": {},
+                    "success": False,
+                    "error": "解析失败",
+                }
+
+            rewritten = parsed.get("rewritten_query") or user_query
+            return {
+                "rewritten_query": rewritten,
+                "intent_tags": parsed.get("intent_tags", []),
+                "keywords": parsed.get("keywords", []),
+                "constraints": parsed.get("constraints", {}),
+                "success": True,
+            }
+
+        except Exception as e:
+            logger.error(f"查询重写失败: {e}")
+            return {
+                "rewritten_query": user_query,
+                "intent_tags": [],
+                "keywords": [],
+                "constraints": {},
+                "success": False,
+                "error": str(e),
+            }
 

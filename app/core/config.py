@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     # 查询配置
     MAX_RETRIEVED_CHUNKS: int = Field(default=5, description="最大检索块数")
     SIMILARITY_THRESHOLD: float = Field(default=0.7, description="相似度阈值")
+
+    # 查询重写配置（攻关任务二）
+    ENABLE_QUERY_REWRITING: bool = Field(default=False, description="启用口语化查询意图转换引擎")
+    ONTOLOGY_JSON_PATH: str = Field(default="./tools/insurance_ontology.json", description="保险术语本体库JSON路径")
+
+    # 查询重写配置（攻关任务二）
+    ENABLE_QUERY_REWRITING: bool = Field(default=False, description="启用口语化查询意图转换")
+    ONTOLOGY_JSON_PATH: str = Field(default="tools/insurance_ontology.json", description="保险术语本体库JSON路径")
     
     # 安全配置
     SECRET_KEY: str = Field(default="your-secret-key-here", description="密钥")
@@ -91,15 +99,14 @@ class Settings(BaseSettings):
         description="用于回退判断的监管关键词"
     )
 
-    # 时效性评分与抑制设置（依据《备案管理办法》《数据安全法》）
-    TIMELINESS_WEIGHT: float = Field(default=50.0, description="时效性分数的整体权重缩放")
-    TIMELINESS_RETENTION_DAYS: int = Field(default=540, description="超过保留阈值视为过期（天）")
-    TIMELINESS_DECAY_CAP_DAYS: int = Field(default=720, description="时效性线性衰减的封顶天数")
-    TIMELINESS_RECENT_BONUS_DAYS: int = Field(default=30, description="最近加分的天数阈值")
-    TIMELINESS_RECENT_BONUS: float = Field(default=10.0, description="最近加分分值")
-    TIMELINESS_PRE_EFFECTIVE_PENALTY_FACTOR: float = Field(default=0.3, description="生效前降权系数")
-    TIMELINESS_WEAK_SOURCE_PENALTY_FACTOR: float = Field(default=0.6, description="弱信号日期来源降权系数")
-    
+    # 攻关任务四：新排序规则（线性加权 + 阶跃时效 + ESG 加分 + 过期惩罚）
+    RERANK_ORIG_WEIGHT: float = Field(default=0.7, description="原始相似度权重 (W_orig)")
+    RERANK_BIZ_WEIGHT: float = Field(default=0.3, description="业务得分权重 (W_biz)")
+    RERANK_RECENCY_BOOST: float = Field(default=0.3, description="时效性阶跃加分（6个月内 +0.3）")
+    RERANK_COMPLIANCE_KEYWORDS: List[str] = Field(default=["ESG"], description="文档内触发的合规关键字")
+    RERANK_COMPLIANCE_BOOST_SCORE: float = Field(default=0.1, description="ESG 加分幅度 (+0.1)")
+    RERANK_EXPIRED_PENALTY: float = Field(default=0.5, description="过期文档固定惩罚因子 (×0.5)")
+
     # 后台任务配置
     CELERY_BROKER_URL: Optional[str] = Field(default=None, description="Celery代理URL")
     CELERY_RESULT_BACKEND: Optional[str] = Field(default=None, description="Celery结果后端")

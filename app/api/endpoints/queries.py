@@ -90,22 +90,59 @@ async def get_query_history(
             end_date=end_date
         )
 
-        return [
-            QueryHistoryResponse(
-                id=record.id,
-                question=record.question,
-                answer=record.answer,
-                query_type=record.query_type,
-                response_time=record.response_time,
-                chunks_used=record.chunks_used,
-                similarity_scores=eval(record.similarity_scores) if record.similarity_scores else [],
-                feedback_rating=record.feedback_rating,
-                feedback_comment=record.feedback_comment,
-                created_at=record.created_at,
-                metadata=eval(record.metadata) if record.metadata else {}
+        results = []
+        for record in history:
+            # 解析检索块JSON以计算 chunks_used 与相似度/最终分数
+            retrieved_chunks = []
+            try:
+                if getattr(record, "retrieved_chunks", None):
+                    import json as _json
+                    retrieved_chunks = _json.loads(record.retrieved_chunks)
+            except Exception:
+                retrieved_chunks = []
+
+            chunks_used = len(retrieved_chunks) if retrieved_chunks else 0
+            similarity_scores = []
+            try:
+                for c in retrieved_chunks:
+                    rd = c.get("ranking_details") or {}
+                    if "final_score" in rd:
+                        similarity_scores.append(float(rd.get("final_score", 0)))
+                    else:
+                        similarity_scores.append(float(c.get("similarity_score", 0)))
+            except Exception:
+                similarity_scores = []
+
+            # 组合元数据（重写信息与原始检索块）
+            metadata_dict = {}
+            try:
+                import json as _json
+                rewriting_meta = _json.loads(record.rewriting_metadata_json) if record.rewriting_metadata_json else None
+                metadata_dict = {
+                    "rewritten_query": getattr(record, "rewritten_query", None),
+                    "rewriting_metadata": rewriting_meta,
+                    "retrieved_chunks": retrieved_chunks,
+                }
+            except Exception:
+                metadata_dict = {"rewritten_query": getattr(record, "rewritten_query", None)}
+
+            results.append(
+                QueryHistoryResponse(
+                    id=record.id,
+                    question=record.query,
+                    answer=record.response,
+                    query_type=record.model_used,
+                    response_time=record.response_time,
+                    chunks_used=chunks_used,
+                    similarity_scores=similarity_scores or None,
+                    feedback_rating=getattr(record, "rating", None),
+                    feedback_comment=getattr(record, "feedback", None),
+                    created_at=record.created_time,
+                    metadata=metadata_dict or None,
+                )
             )
-            for record in history
-        ]
+
+        return results
 
     except Exception as e:
         logger.error(f"获取查询历史失败: {e}")
@@ -120,18 +157,49 @@ async def get_query_detail(query_id: int, db: Session = Depends(get_db)):
         if not query_record:
             raise HTTPException(status_code=404, detail="查询记录不存在")
 
+        # 解析检索块与重写元数据
+        import json as _json
+        retrieved_chunks = []
+        try:
+            if getattr(query_record, "retrieved_chunks", None):
+                retrieved_chunks = _json.loads(query_record.retrieved_chunks)
+        except Exception:
+            retrieved_chunks = []
+
+        chunks_used = len(retrieved_chunks) if retrieved_chunks else 0
+        similarity_scores = []
+        try:
+            for c in retrieved_chunks:
+                rd = c.get("ranking_details") or {}
+                if "final_score" in rd:
+                    similarity_scores.append(float(rd.get("final_score", 0)))
+                else:
+                    similarity_scores.append(float(c.get("similarity_score", 0)))
+        except Exception:
+            similarity_scores = []
+
+        rewriting_meta = None
+        try:
+            rewriting_meta = _json.loads(query_record.rewriting_metadata_json) if query_record.rewriting_metadata_json else None
+        except Exception:
+            rewriting_meta = None
+
         return QueryHistoryResponse(
             id=query_record.id,
-            question=query_record.question,
-            answer=query_record.answer,
-            query_type=query_record.query_type,
+            question=query_record.query,
+            answer=query_record.response,
+            query_type=query_record.model_used,
             response_time=query_record.response_time,
-            chunks_used=query_record.chunks_used,
-            similarity_scores=eval(query_record.similarity_scores) if query_record.similarity_scores else None,
-            feedback_rating=query_record.feedback_rating,
-            feedback_comment=query_record.feedback_comment,
-            created_at=query_record.created_at,
-            metadata=eval(query_record.metadata) if query_record.metadata else None
+            chunks_used=chunks_used,
+            similarity_scores=similarity_scores or None,
+            feedback_rating=getattr(query_record, "rating", None),
+            feedback_comment=getattr(query_record, "feedback", None),
+            created_at=query_record.created_time,
+            metadata={
+                "rewritten_query": getattr(query_record, "rewritten_query", None),
+                "rewriting_metadata": rewriting_meta,
+                "retrieved_chunks": retrieved_chunks,
+            }
         )
 
     except HTTPException:
@@ -150,7 +218,7 @@ async def submit_feedback(
     """为查询结果提交反馈"""
     try:
         query_service = QueryService()
-        success = query_service.update_query_feedback(
+        success = await query_service.update_query_feedback(
             db=db,
             query_id=query_id,
             rating=feedback.rating,
@@ -218,11 +286,8 @@ async def batch_query(
         # 逐个处理查询
         for question in questions:
             try:
-                response = await query_service.process_query(
-                    db=db,
-                    question=question,
-                    query_type=query_type
-                )
+                req = QueryRequest(question=question, query_type=query_type)
+                response = await query_service.process_query(db=db, request=req)
                 responses.append(response)
             except Exception as e:
                 # 单个查询失败时,添加错误响应
@@ -263,8 +328,8 @@ async def get_query_suggestions(
             return []
 
         # 从历史查询中搜索相似问题
-        similar_queries = db.query(QueryHistory.question).filter(
-            QueryHistory.question.contains(partial_query.strip())
+        similar_queries = db.query(QueryHistory.query).filter(
+            QueryHistory.query.contains(partial_query.strip())
         ).distinct().limit(limit).all()
 
         suggestions = [query[0] for query in similar_queries]
@@ -332,7 +397,7 @@ async def clear_query_history(
 
         if days:
             cutoff_date = datetime.utcnow() - timedelta(days=days)
-            query = query.filter(QueryHistory.created_at < cutoff_date)
+            query = query.filter(QueryHistory.created_time < cutoff_date)
             deleted_count = query.count()
             query.delete()
         else:

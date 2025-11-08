@@ -4,12 +4,14 @@ InsurIntellect Agent API 测试脚本
 测试系统的主要 API 端点功能
 """
 
+import os
 import requests
 import time
 from app.core.app_logging import setup_logging, get_logger
 
 
-BASE_URL = "http://localhost:8001"
+# 支持环境变量配置，默认使用本地 8000
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 
 # 初始化日志
 logger = setup_logging()
@@ -50,7 +52,7 @@ def test_query_endpoint_correct() -> bool:
         response = requests.post(
             f"{BASE_URL}/api/v1/queries/ask",
             json=data,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json; charset=utf-8"},
             timeout=30,
         )
         logger.info(f"状态码: {response.status_code}")
@@ -141,18 +143,33 @@ def main():
     # 4. 查询端点
     query_result = test_query_endpoint_correct()
 
+    # 5. 新增：异常路径也返回 query_id 的自检
+    ask_query_id_ok = test_ask_returns_query_id_even_on_error()
+
+    # 6. 新增：历史计数随 ask 增加的自检
+    history_increase_ok = test_history_count_increases_after_ask()
+
     # 总结
     logger.info("\n" + "=" * 50)
     logger.info("📊 测试结果总结:")
     logger.info("=" * 50)
 
-    total_passed = basic_passed + (1 if health_result else 0) + (1 if alt_health_result else 0) + (1 if query_result else 0)
-    total_tests = basic_total + 3
+    total_passed = (
+        basic_passed
+        + (1 if health_result else 0)
+        + (1 if alt_health_result else 0)
+        + (1 if query_result else 0)
+        + (1 if ask_query_id_ok else 0)
+        + (1 if history_increase_ok else 0)
+    )
+    total_tests = basic_total + 5
 
     logger.info(f"基础端点: {basic_passed}/{basic_total}")
     logger.info(f"主健康检查: {'1/1' if health_result else '0/1'}")
     logger.info(f"其他健康检查: {'1/1' if alt_health_result else '0/1'}")
     logger.info(f"查询端点: {'1/1' if query_result else '0/1'}")
+    logger.info(f"异常路径 query_id: {'1/1' if ask_query_id_ok else '0/1'}")
+    logger.info(f"历史计数递增: {'1/1' if history_increase_ok else '0/1'}")
     logger.info("-" * 50)
     logger.info(f"🎯 总体结果: {total_passed}/{total_tests} 测试通过")
 
@@ -160,6 +177,96 @@ def main():
         logger.info("🎉 所有测试通过! API 服务运行正常。")
     else:
         logger.warning("⚠️  部分测试失败，请检查服务配置。")
+
+
+ 
+
+def test_ask_returns_query_id_even_on_error() -> bool:
+    """自检：无模型/密钥时也应返回非空 query_id。"""
+    logger.info("\n🔍 自检：异常路径也返回 query_id ...")
+    try:
+        payload = {"question": "测试：没有API密钥时也应返回 query_id", "query_type": "general"}
+        r = requests.post(
+            f"{BASE_URL}/api/v1/queries/ask",
+            json=payload,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            timeout=30,
+        )
+        logger.info(f"状态码: {r.status_code}")
+        if r.status_code != 200:
+            logger.error(f"❌ /queries/ask 返回 {r.status_code}")
+            return False
+        body = r.json()
+        qid = body.get("query_id")
+        ok = isinstance(qid, int) and qid > 0
+        if ok:
+            logger.info(f"✅ query_id 非空: {qid}")
+        else:
+            logger.error(f"❌ query_id 非法: {qid}")
+        return ok
+    except Exception as e:
+        logger.error(f"❌ 自检异常: {e}")
+        return False
+
+
+def _get_history_count_and_items() -> tuple[int, list]:
+    try:
+        r = requests.get(f"{BASE_URL}/api/v1/queries/history", timeout=15)
+        if r.status_code != 200:
+            logger.error(f"❌ /queries/history 返回 {r.status_code}")
+            return 0, []
+        data = r.json()
+        # 兼容不同结构：可能是 {items:[...], Count:n} 或纯列表
+        if isinstance(data, dict):
+            items = data.get("items") or data.get("history") or []
+            count = data.get("Count") or len(items)
+            return int(count), items
+        elif isinstance(data, list):
+            return len(data), data
+        else:
+            return 0, []
+    except Exception as e:
+        logger.error(f"❌ 获取历史异常: {e}")
+        return 0, []
+
+
+def test_history_count_increases_after_ask() -> bool:
+    """自检：调用 /ask 后，历史计数应增加且 ID 对应。"""
+    logger.info("\n🔍 自检：/ask 后历史计数递增 ...")
+    before_count, _ = _get_history_count_and_items()
+    logger.info(f"调用前历史计数: {before_count}")
+
+    # 触发一次 ask
+    payload = {"question": "自检：计数递增校验", "query_type": "general"}
+    r = requests.post(
+        f"{BASE_URL}/api/v1/queries/ask",
+        json=payload,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        timeout=30,
+    )
+    if r.status_code != 200:
+        logger.error(f"❌ /queries/ask 返回 {r.status_code}")
+        return False
+    qid = r.json().get("query_id")
+
+    # 再次获取历史
+    after_count, items = _get_history_count_and_items()
+    logger.info(f"调用后历史计数: {after_count}")
+
+    inc_ok = after_count >= before_count + 1
+    id_ok = any((item.get("id") == qid) for item in items) if items and isinstance(qid, int) else True
+
+    if inc_ok:
+        logger.info("✅ 历史计数递增")
+    else:
+        logger.error("❌ 历史计数未递增")
+    if isinstance(qid, int):
+        if id_ok:
+            logger.info(f"✅ 历史中存在对应 ID: {qid}")
+        else:
+            logger.warning(f"⚠️ 历史未找到对应 ID: {qid}（可能被截断或分页）")
+
+    return inc_ok and (id_ok or not isinstance(qid, int))
 
 
 if __name__ == "__main__":
