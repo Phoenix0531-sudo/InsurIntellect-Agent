@@ -245,6 +245,99 @@ set BASE_URL=http://localhost:8000  # Windows PowerShell 使用 $env:BASE_URL
 python tools/test_api.py
 ```
 
+#### 流式问答（/api/v1/queries/ask/stream）
+
+流式接口用于边检索边生成，事件按行输出，便于前端实时展示：
+- `start`：开始事件，携带 `query_id` 与初始上下文信息。
+- `context`：检索事件，包含 `retrieved_chunks` 原始片段列表（`doc_id`/`chunk_id`/`score`/`content_preview`/`metadata`）。
+- `token`：生成过程中的增量 token。
+- `end`：结束事件，包含完整 `answer` 与统计信息（如 `response_time`/`chunks_used`）。
+- `error`：错误事件（如检索为空时的提示）。
+
+示例（Windows）：
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/v1/queries/ask/stream" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "question": "比较重疾险与医疗险的保障差异",
+    "query_type": "general",
+    "similarity_threshold": 0.5,
+    "max_chunks": 6,
+    "include_metadata": true
+  }'
+```
+提示：请避免使用会截断 SSE 的管道/分页；若仅调试检索，可关注 `context` 事件中的 `retrieved_chunks`。
+
+### 多轮对话与 session_id 使用
+
+- `session_id`：可选字符串，用于标识同一会话线程，并在改写阶段携带该会话的近期聊天历史。
+- 历史窗口：最多保留最近 10 轮的用户/助手消息，合并后再截断至 4000 字符，保证提示安全性与可控成本。
+- 改写用途：历史仅用于查询改写（QueryRewriterService），不改变持久化的原始 `question` 字段；改写结果写入 `metadata.rewritten_query`，改写的结构化元数据写入 `metadata.rewriting_metadata`（来源于数据库列 `QueryHistory.rewriting_metadata_json`）。
+- 开启方式：在 `.env` 或环境变量中设置 `ENABLE_QUERY_REWRITING=true`，并确保 `ONTOLOGY_JSON_PATH=tools/insurance_ontology.json` 可读。
+
+示例（非流式）：
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/queries/ask" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "question": "这份保险的保障范围是什么？",
+    "query_type": "general",
+    "session_id": "uuid-会话-001"
+  }'
+```
+
+示例（流式）：
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/v1/queries/ask/stream" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "question": "比较重疾险与医疗险的保障差异",
+    "query_type": "general",
+    "max_chunks": 6,
+    "session_id": "uuid-会话-001",
+    "include_metadata": true
+  }'
+```
+
+返回体中的会话与改写字段：
+- `metadata.rewritten_query`：当前问题的轻量改写，用于提升检索质量；可能为 `null`（当未启用改写时）。
+- `metadata.rewriting_metadata`：结构化改写元信息（由 `QueryHistory.rewriting_metadata_json` 解析而来）；当未启用改写时为 `null`。
+- `QueryHistory.session_id`：数据库中记录会话标识，便于多轮追踪与统计（不直接出现在响应模型中）。
+
+注意：即使未启用改写，`session_id` 也会被持久化；当启用改写后，历史会被用于提示构造（10 轮 + 4000 字符上限）。
+
+#### 检索阈值建议与批量测试示例
+
+基于本地测试：
+- 监管类/规范类问题：推荐 `similarity_threshold=0.5–0.7`（更严格、命中更精准）。
+- 产品比较/一般性问题：推荐 `0.35–0.5`（更宽松、提高召回）。
+
+批量对比示例（非流式接口）：
+```bash
+# 低阈值（提高召回，可能有噪声）
+curl -X POST "http://127.0.0.1:8000/api/v1/queries/ask" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "question": "中国银行保险监督管理委员会对健康险产品的最新规定有哪些？",
+    "query_type": "regulatory",
+    "similarity_threshold": 0.35,
+    "max_chunks": 6,
+    "include_metadata": true
+  }'
+
+# 高阈值（更严格，更适合监管类精准问答）
+curl -X POST "http://127.0.0.1:8000/api/v1/queries/ask" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "question": "中国银行保险监督管理委员会对健康险产品的最新规定有哪些？",
+    "query_type": "regulatory",
+    "similarity_threshold": 0.7,
+    "max_chunks": 6,
+    "include_metadata": true
+  }'
+```
+返回中可关注 `chunks_used`、`confidence_score` 与 `retrieved_chunks` 内容差异，以评估阈值设置的影响。
+
 ### 系统与健康（/api/v1/health, /api/v1/admin）
 
 - `GET /api/v1/health/live` - 存活检查
@@ -704,6 +797,21 @@ tail -f logs/error.log
 4. 创建Pull Request
 
 ## � 变更日志
+- 2025-11-10
+  - 解析参数弃用修复：`partition_pdf` 仅传 `languages`，弃用 `ocr_languages`。`ingestion_config.yml` 改为 `parser.languages`，并在代码中保留向后兼容以避免双参数告警。
+  - 依赖稳定化：固定 `unstructured==0.18.18`、`unstructured-inference==0.7.34`，解决第三方内部 `password` 误告警与不兼容问题（与 Python 3.13 兼容）。
+  - 验证脚本修复：`scripts/validate_retrieval.py` 支持 `--k`/`--top_k` 参数；日志初始化改为 `setup_logging(log_level=...)`；执行后输出检验报告路径。
+  - 快速检索验证：`python scripts\\validate_retrieval.py --question "什么是车险免赔额？" --k 5 --output data\\vector_db\\chroma\\retrieval_verification.json`。
+  - 仅解析模式（不写库）：Windows 下可 `set PREPARE_ONLY=1 && set REBUILD_VECTOR_DB=0 && python ingest.py`，用于观察解析告警与性能。
+  - 故障排除：若出现 `PyMuPDF` 编译错误（Windows 缺少 VS 工具链），请保留现有已编译版本或安装预编译二进制；OCR 回退需确保 `TESSERACT_CMD` 指向正确。
+- 2025-11-09
+  - 查询服务：新增 `RetrievedChunk` 规范化，兼容 `doc_id/document_id`、`chunk_id/id`、`score/similarity_score`，相似度分数钳制到 `[0,1]`，保证 `metadata` 为字典；异常路径不再触发 422 校验错误。
+  - 响应与历史：`/api/v1/queries/ask` 同步响应与历史记录均包含 `retrieved_chunks`（为空时返回空数组）；确认 `metadata.rewritten_query` 与 `rewriting_metadata` 在不可用路径下为 `null` 的行为并记录。
+  - 流式接口：补充 `/api/v1/queries/ask/stream` 事件说明（`start/context/token/end/error`），并在文档中增加示例，`context` 事件携带原始检索片段用于前端可视化。
+  - 端口与前端：统一本地运行端口为 `8000`，根路径 `/` 正常返回前端预览页面，验证事件流无报错。
+  - 阈值建议：基于批量与流式测试，建议监管类问题使用 `similarity_threshold=0.5–0.7`，产品比较/一般问题使用 `0.35–0.5`；示例命令与脚本说明已补充。
+  - 编码兼容：为 `curl` 示例统一添加 `charset=utf-8` 以减少中文乱码；在 Windows 终端中建议使用 `curl.exe` 并避免管道截断 SSE 事件。
+  - 健康检查：说明 `GET /api/v1/health/ready` 可能显示 `not_ready`（向量服务预热/索引初始化标志未就绪），不影响正常查询与生成；以 `live` 与整体健康结果为准。
 - 2025-11-08
   - `query_service.process_query` 异常路径持久化查询历史并保证返回非空 `query_id`
   - `tools/test_api.py` 增加 `query_id` 与历史增长自检，支持 `BASE_URL` 环境变量
