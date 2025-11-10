@@ -7,6 +7,7 @@ DocumentParserService
 """
 
 from typing import List, Dict, Any, Optional, Tuple
+import os
 from pathlib import Path
 
 try:
@@ -23,17 +24,21 @@ logger = get_logger(__name__)
 class DocumentParserService:
     def __init__(self,
                  strategy: str = "hi_res",
-                 ocr_languages: str = "chi_sim+eng",
+                 languages: Optional[str] = None,
+                 ocr_languages: Optional[str] = "chi_sim+eng",
                  infer_table_structure: bool = True,
                  token_chunk_target: int = 512,
                  token_chunk_max: int = 1024,
-                 chunk_overlap: int = 64):
+                 chunk_overlap: int = 64,
+                 engine: str = "unstructured"):
         self.strategy = strategy
-        self.ocr_languages = ocr_languages
+        # 兼容旧配置：优先使用 languages，其次使用 ocr_languages（已弃用）
+        self.languages = (languages or ocr_languages or "chi_sim+eng")
         self.infer_table_structure = infer_table_structure
         self.token_chunk_target = token_chunk_target
         self.token_chunk_max = token_chunk_max
         self.chunk_overlap = chunk_overlap
+        self.engine = (engine or "unstructured").lower()
 
     def _token_split(self, text: str) -> List[str]:
         """二级分割：基于 token 的长度控制。
@@ -120,24 +125,27 @@ class DocumentParserService:
 
     def parse_pdf_to_chunks(self, pdf_path: Path, source_group: str, document_type: str) -> List[Document]:
         """解析 PDF 并返回语义保留的 Document 列表（每个元素或表格为一个基础块，随后做二级 token 分割）。"""
+        # 若明确选择非 unstructured 引擎，则直接回退
+        if self.engine != "unstructured":
+            return self._fallback_parse_pdf(pdf_path, source_group, document_type)
         try:
             from unstructured.partition.pdf import partition_pdf  # type: ignore
         except Exception as e:
-            logger.error(f"未安装 unstructured 解析库: {e}")
-            return []
+            logger.warning(f"未安装 unstructured 解析库，使用回退解析: {e}")
+            return self._fallback_parse_pdf(pdf_path, source_group, document_type)
 
         elements = []
         try:
             elements = partition_pdf(
                 filename=str(pdf_path),
                 strategy=self.strategy,
-                ocr_languages=self.ocr_languages,
+                languages=self.languages,
                 infer_table_structure=self.infer_table_structure,
                 include_page_breaks=True,
             )
         except Exception as e:
-            logger.error(f"partition_pdf 解析失败: {e}")
-            return []
+            logger.warning(f"partition_pdf 解析失败，使用回退解析: {e}")
+            return self._fallback_parse_pdf(pdf_path, source_group, document_type)
 
         # 排序：按页、按 y0、再按 x0，尽量维持阅读顺序（hi_res 已内置列检测能力）
         def _sort_key(el: Any):
@@ -201,3 +209,84 @@ class DocumentParserService:
         logger.info(f"布局解析完成: {pdf_path.name}, 生成基础块 {len(docs)}")
         return docs
 
+    def _fallback_parse_pdf(self, pdf_path: Path, source_group: str, document_type: str) -> List[Document]:
+        """当 unstructured 无法使用时的回退解析：使用 PyPDF2/pypdf 逐页提取文本并进行二级 token 分割。"""
+        try:
+            try:
+                from PyPDF2 import PdfReader  # type: ignore
+            except Exception:
+                from pypdf import PdfReader  # type: ignore
+        except Exception as e:
+            logger.error(f"未安装 PDF 解析后备库: {e}")
+            return []
+
+        docs: List[Document] = []
+        try:
+            reader = PdfReader(str(pdf_path))
+            for i, page in enumerate(getattr(reader, "pages", []), start=1):
+                try:
+                    text = page.extract_text() or ""
+                except Exception:
+                    text = ""
+                if not text.strip():
+                    # 尝试使用 PyMuPDF 文本提取作为第一回退
+                    try:
+                        import fitz  # type: ignore
+                        with fitz.open(str(pdf_path)) as doc:
+                            if i - 1 < doc.page_count:
+                                page_obj = doc.load_page(i - 1)
+                                text = page_obj.get_text("text") or ""
+                    except Exception:
+                        text = text or ""
+                    # 若仍为空，进行 OCR 回退（适用于扫描版 PDF）
+                    if not text.strip():
+                        try:
+                            import fitz  # type: ignore
+                            import pytesseract  # type: ignore
+                            from PIL import Image  # type: ignore
+
+                            tcmd = os.getenv("TESSERACT_CMD", "").strip()
+                            if tcmd:
+                                try:
+                                    pytesseract.pytesseract.tesseract_cmd = tcmd
+                                except Exception:
+                                    pass
+
+                            with fitz.open(str(pdf_path)) as doc:
+                                if i - 1 < doc.page_count:
+                                    page_obj = doc.load_page(i - 1)
+                                    pix = page_obj.get_pixmap(matrix=fitz.Matrix(2, 2))
+                                    mode = "RGB" if pix.n < 4 else "RGBA"
+                                    img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
+                                    if mode == "RGBA":
+                                        img = img.convert("RGB")
+                                    # OCR 语言配置（如 chi_sim+eng）
+                                    ocr_lang = (self.languages or "chi_sim+eng").strip()
+                                    try:
+                                        text = pytesseract.image_to_string(img, lang=ocr_lang) or ""
+                                    except Exception:
+                                        text = ""
+                        except Exception:
+                            text = text or ""
+                    if not text.strip():
+                        continue
+                base_meta = {
+                    "source_file": pdf_path.name,
+                    "file_path": str(pdf_path),
+                    "page_number": i,
+                    "layout_type": "page_text" if text else "ocr_text",
+                    "bbox": None,
+                    "source_group": source_group,
+                    "document_type": document_type,
+                }
+                for sub in self._token_split(text):
+                    docs.append(Document(page_content=sub, metadata=base_meta))
+
+            if docs:
+                logger.info(f"回退解析完成: {pdf_path.name}, 生成基础块 {len(docs)}")
+            else:
+                logger.warning(f"回退解析失败或为空: {pdf_path.name}")
+            return docs
+        except Exception as e:
+            logger.error(f"回退 PDF 解析异常: {e}")
+            return []

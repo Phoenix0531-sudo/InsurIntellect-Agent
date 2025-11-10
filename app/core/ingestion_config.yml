@@ -11,7 +11,7 @@ general:
   parser:
     engine: "unstructured"
     strategy: "hi_res"
-    ocr_languages: "chi_sim+eng"
+    languages: "chi_sim+eng"
     infer_table_structure: true
     token_chunk_target: 512
     token_chunk_max: 1024
@@ -53,6 +53,7 @@ profiles:
   terms:
     document_type: "条款"
     parser:
+      engine: "unstructured"
       strategy: "hi_res"
     ocr:
       enabled: false
@@ -70,6 +71,7 @@ profiles:
   manuals:
     document_type: "说明书"
     parser:
+      engine: "unstructured"
       strategy: "hi_res"
     ocr:
       enabled: false
@@ -87,6 +89,7 @@ profiles:
   tables:
     document_type: "费率/利益"
     parser:
+      engine: "unstructured"
       strategy: "hi_res"
     ocr:
       enabled: false

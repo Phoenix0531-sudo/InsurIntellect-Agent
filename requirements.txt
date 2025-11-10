@@ -10,6 +10,8 @@ langchain-chroma==0.1.2
 langchain-community==0.2.19
 langchain-text-splitters==0.2.4
 sentence-transformers==3.2.1
+accelerate==0.31.0
+transformers==4.45.1
 psutil==5.9.8
 
 # 向量数据库
@@ -23,9 +25,9 @@ python-multipart==0.0.20
 PyMuPDF==1.24.10
 pytesseract==0.3.10
 Pillow==10.3.0
-unstructured==0.14.9
+unstructured==0.18.18
 unstructured-inference==0.7.34
-pdfminer.six==20240728
+pdfminer.six==20231228
 beautifulsoup4==4.12.3
 tiktoken==0.7.0
 onnxruntime==1.19.2
@@ -35,14 +37,19 @@ opencv-python-headless==4.10.0.84
 pandas==2.1.3
 numpy==1.24.4
 scikit-learn==1.3.2
+datasets==2.19.0
 
 # 数据库
 sqlalchemy==2.0.23
+# 异步数据库驱动（PostgreSQL 生产用）
+asyncpg==0.29.0
+# 可选：开发/本地用 SQLite 异步驱动
+aiosqlite==0.20.0
 # sqlite3 是Python内置模块，无需在requirements.txt中指定
 
 # 配置管理
 python-dotenv==1.0.1
-pydantic==2.5.0
+pydantic==2.8.2
 pydantic-settings==2.8.1
 
 # 日志和监控
@@ -68,3 +75,7 @@ coloredlogs==15.0.1
 backoff==2.2.1
 tenacity==8.5.0
 tqdm==4.67.1
+
+# 检索与分词
+rank_bm25==0.2.2
+jieba==0.42.1

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 InsurIntellect Agent - Data Ingestion Pipeline
 =============================================
@@ -22,6 +22,11 @@ from typing import Dict, List, Any, Optional, Tuple
 import shutil
 import hashlib
 import asyncio
+import pickle
+
+# BM25 and Chinese tokenizer
+from rank_bm25 import BM25Plus
+import jieba
 
 # LangChain imports
 from langchain_community.document_loaders import PyPDFLoader
@@ -42,6 +47,8 @@ from app.core.chromadb_manager import chroma_manager
 from app.core.app_logging import get_logger as _get_logger
 from app.services.document_parser_service import DocumentParserService
 from app.services.llm_service import LLMService
+from app.core.database import init_db, db_manager
+from app.models.database_models import DocumentMetadata
 
 # OCR imports
 import fitz  # PyMuPDF
@@ -321,17 +328,25 @@ def main():
         """基于 DocumentParserService 的布局感知解析，返回语义保留块。"""
         nonlocal total_pages, ocr_pages
         strategy = (parser_cfg.get("strategy") or general.get("parser", {}).get("strategy") or "hi_res")
-        ocr_lang = general.get("parser", {}).get("ocr_languages", OCR_LANG)
+        engine = (parser_cfg.get("engine") or general.get("parser", {}).get("engine") or "unstructured")
+        # 兼容新旧配置：优先读取 languages，其次 ocr_languages
+        ocr_lang = (
+            parser_cfg.get("languages")
+            or general.get("parser", {}).get("languages")
+            or general.get("parser", {}).get("ocr_languages")
+            or OCR_LANG
+        )
         token_chunk_target = int(general.get("parser", {}).get("token_chunk_target", 512))
         token_chunk_max = int(general.get("parser", {}).get("token_chunk_max", 1024))
         chunk_overlap = int(general.get("parser", {}).get("chunk_overlap", 64))
         service = DocumentParserService(
             strategy=str(strategy),
-            ocr_languages=str(ocr_lang),
+            languages=str(ocr_lang),
             infer_table_structure=True,
             token_chunk_target=token_chunk_target,
             token_chunk_max=token_chunk_max,
             chunk_overlap=chunk_overlap,
+            engine=str(engine),
         )
         docs = service.parse_pdf_to_chunks(pdf_file, source_group=source_group, document_type=document_type)
         # 估算页数与 OCR 页（hi_res 内部按需 OCR，无法逐页统计，此处保留总数估计）
@@ -433,11 +448,16 @@ def main():
 
                 # 添加/合并元数据（AI 元数据 + 现有）
                 for chunk in document_chunks:
+                    # 生成稳定 chunk_id: sha1(file_path|page_number|normalized_text)
+                    norm_text = _normalize_text(chunk.page_content or "")
+                    key = f"{chunk.metadata.get('file_path','')}|{chunk.metadata.get('page_number','')}|{norm_text}"
+                    chunk_id = hashlib.sha1(key.encode("utf-8")).hexdigest()
                     chunk.metadata.update({
                         "source_file": pdf_file.name,
                         "file_path": str(pdf_file),
                         "document_type": selected_doc_type,
                         "source_group": selected_group,
+                        "chunk_id": chunk_id,
                         **ai_metadata,
                     })
 
@@ -464,10 +484,14 @@ def main():
                 try:
                     async with sem:
                         kws = await asyncio.wait_for(llm.extract_keywords(text, max_keywords=max_keywords), timeout=timeout_s)
-                        doc.metadata["keywords_json"] = kws
+                        # ChromaDB 元数据字段仅支持原子类型，将列表序列化为 JSON 字符串
+                        try:
+                            doc.metadata["keywords_json"] = json.dumps(kws, ensure_ascii=False)
+                        except Exception:
+                            doc.metadata["keywords_json"] = ",".join([str(x) for x in (kws or [])])
                 except Exception:
-                    # 失败情况下不写入或写入空数组
-                    doc.metadata.setdefault("keywords_json", [])
+                    # 失败情况下写入空 JSON 数组字符串，避免列表类型导致写入失败
+                    doc.metadata.setdefault("keywords_json", "[]")
             await asyncio.gather(*[_one(d) for d in docs], return_exceptions=True)
 
         try:
@@ -489,7 +513,7 @@ def main():
         with export_path.open("w", encoding="utf-8") as f:
             for ch in all_documents:
                 # 稳定ID:基于文件路径,页号,规范化文本内容
-                norm_text = ch.page_content.strip()
+                norm_text = _normalize_text(ch.page_content or "")
                 key = f"{ch.metadata.get('file_path','')}|{ch.metadata.get('page_number','')}|{norm_text}"
                 _id = hashlib.sha1(key.encode("utf-8")).hexdigest()
                 payload = {
@@ -531,6 +555,54 @@ def main():
     except Exception as e:
         logger.error(f"初始化嵌入模型失败: {e}")
         return
+
+    # 构建并持久化 BM25 索引与 chunk 映射（与向量库使用相同的列表与chunk_id）
+    try:
+        logger.info("开始构建 BM25 索引（BM25Plus + jieba 分词）...")
+        bm25_dir = Path("data/processed")
+        bm25_dir.mkdir(parents=True, exist_ok=True)
+
+        # 准备 corpus 与 id 映射
+        chunk_ids: List[str] = []
+        chunk_texts: List[str] = []
+        for ch in all_documents:
+            cid = ch.metadata.get("chunk_id")
+            if not cid:
+                # 若缺失则回退生成
+                norm_text = _normalize_text(ch.page_content or "")
+                key = f"{ch.metadata.get('file_path','')}|{ch.metadata.get('page_number','')}|{norm_text}"
+                cid = hashlib.sha1(key.encode("utf-8")).hexdigest()
+                ch.metadata["chunk_id"] = cid
+            chunk_ids.append(cid)
+            chunk_texts.append(ch.page_content or "")
+
+        # 分词（中文优先，兼容英文与符号）
+        tokenized_corpus: List[List[str]] = []
+        for txt in chunk_texts:
+            try:
+                tokens = [t.strip() for t in jieba.lcut(_normalize_text(txt)) if t.strip()]
+            except Exception:
+                # 回退: 按空白分割
+                tokens = [t.strip() for t in (_normalize_text(txt).split()) if t.strip()]
+            tokenized_corpus.append(tokens)
+
+        bm25_model = BM25Plus(tokenized_corpus)
+        bm25_payload = {
+            "bm25": bm25_model,
+            "ids": chunk_ids,
+        }
+
+        with (bm25_dir / "bm25_index.pkl").open("wb") as pf:
+            pickle.dump(bm25_payload, pf)
+        logger.info("BM25 索引已持久化到 data/processed/bm25_index.pkl")
+
+        # 持久化 chunk_id -> text 映射为 JSON
+        chunk_map_path = bm25_dir / "bm25_chunk_map.json"
+        with chunk_map_path.open("w", encoding="utf-8") as jf:
+            json.dump({chunk_ids[i]: chunk_texts[i] for i in range(len(chunk_ids))}, jf, ensure_ascii=False)
+        logger.info("BM25 chunk 映射已持久化到 data/processed/bm25_chunk_map.json")
+    except Exception as e:
+        logger.warning(f"BM25 索引构建或持久化失败（将继续仅向量流程）: {e}")
     
     # 创建/重建向量数据库目录
     vector_store_dir = Path(vector_store_path)
@@ -566,8 +638,29 @@ def main():
             end = min(start + batch_size, total)
             batch_docs = all_documents[start:end]
             logger.info(f"写入批次 {start}-{end},共 {len(batch_docs)} 个文档块")
+            # 在写入前统一清洗元数据，确保所有值为 Chroma 允许的原子类型
+            def _sanitize_metadata(md: Dict[str, Any]) -> Dict[str, Any]:
+                out: Dict[str, Any] = {}
+                for k, v in (md or {}).items():
+                    if v is None or isinstance(v, (str, int, float, bool)):
+                        out[k] = v
+                    elif isinstance(v, (list, dict)):
+                        try:
+                            out[k] = json.dumps(v, ensure_ascii=False)
+                        except Exception:
+                            out[k] = str(v)
+                    else:
+                        out[k] = str(v)
+                return out
+            for _d in batch_docs:
+                try:
+                    _d.metadata = _sanitize_metadata(getattr(_d, "metadata", {}) or {})
+                except Exception:
+                    pass
             try:
-                vectorstore.add_documents(batch_docs)
+                # 使用稳定 chunk_id 作为向量库的 ids，确保与BM25一致
+                ids = [doc.metadata.get("chunk_id") or "" for doc in batch_docs]
+                vectorstore.add_documents(batch_docs, ids=ids)
             except Exception as e:
                 msg = str(e)
                 # 针对 BGE 大模型的 512 token 输入限制,切换到 bge-m3 作为兜底
@@ -586,6 +679,11 @@ def main():
                         collection_name=collection_name,
                     )
                     fallback_applied = True
+                    for _d in batch_docs:
+                        try:
+                            _d.metadata = _sanitize_metadata(getattr(_d, "metadata", {}) or {})
+                        except Exception:
+                            pass
                     vectorstore.add_documents(batch_docs)
                 # 针对外部服务的限制或网络问题，自动回退到本地嵌入以继续
                 elif ("429" in msg or "Too Many Requests" in msg or "timed out" in msg or "Timeout" in msg or "SSL" in msg or "Connection" in msg or "HTTP" in msg) and not local_fallback_applied:
@@ -600,6 +698,11 @@ def main():
                             collection_name=collection_name,
                         )
                         local_fallback_applied = True
+                        for _d in batch_docs:
+                            try:
+                                _d.metadata = _sanitize_metadata(getattr(_d, "metadata", {}) or {})
+                            except Exception:
+                                pass
                         vectorstore.add_documents(batch_docs)
                     except Exception as e2:
                         logger.error(f"本地嵌入回退失败: {e2}")
@@ -612,6 +715,14 @@ def main():
         logger.info(f"成功创建/更新向量数据库,存储路径: {vector_store_path}")
         logger.info(f"数据库本次写入 {len(all_documents)} 个文档块,处理 {total_files} 个文件")
         logger.info(f"文本页总数: {total_pages},其中 OCR 页数: {ocr_pages}")
+
+        # 在向量库构建完成后，将结构化元数据持久化到 SQL 表 document_metadata
+        try:
+            logger.info("开始持久化结构化元数据到 SQL 表 document_metadata...")
+            asyncio.run(_persist_structured_metadata(all_documents))
+            logger.info("结构化元数据持久化完成")
+        except Exception as e:
+            logger.warning(f"结构化元数据持久化失败: {e}")
         
         # 验证数据库（如果集合可用）
         try:
@@ -630,5 +741,73 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+async def _persist_structured_metadata(all_documents):
+    """将文档块的结构化元数据写入 SQL 表 document_metadata。
+
+    期望从每个文档块中提取如下字段：
+    - chunk_id
+    - product_name
+    - effective_date
+    - document_type
+    - status
+    若缺失则跳过该条（至少需要 chunk_id）。
+    """
+    try:
+        # 确保表结构已创建
+        await init_db()
+
+        # 创建异步会话
+        session = await db_manager.create_session()
+        inserted = 0
+
+        from sqlalchemy import select
+
+        for ch in (all_documents or []):
+            try:
+                meta = getattr(ch, "metadata", None)
+                if meta is None:
+                    meta = ch.get("metadata") if isinstance(ch, dict) else {}
+
+                chunk_id = meta.get("chunk_id") if isinstance(meta, dict) else None
+                if not chunk_id:
+                    # 若缺失则回退生成
+                    norm_text = _normalize_text(getattr(ch, "page_content", "") or (ch.get("page_content") if isinstance(ch, dict) else ""))
+                    key = f"{(meta.get('file_path') if isinstance(meta, dict) else '')}|{(meta.get('page_number') if isinstance(meta, dict) else '')}|{norm_text}"
+                    chunk_id = hashlib.sha1(key.encode("utf-8")).hexdigest()
+
+                product_name = (meta.get("product_name") if isinstance(meta, dict) else None) or (meta.get("plan_name") if isinstance(meta, dict) else None)
+                effective_date = (meta.get("effective_date") if isinstance(meta, dict) else None) or (meta.get("effective") if isinstance(meta, dict) else None)
+                document_type = (meta.get("document_type") if isinstance(meta, dict) else None) or (meta.get("doc_type") if isinstance(meta, dict) else None)
+                status = (meta.get("status") if isinstance(meta, dict) else None) or "active"
+
+                # 去重：若 chunk_id 已存在则跳过
+                exists = (
+                    await session.execute(
+                        select(DocumentMetadata).where(DocumentMetadata.chunk_id == str(chunk_id))
+                    )
+                ).scalar_one_or_none()
+                if exists:
+                    continue
+
+                record = DocumentMetadata(
+                    chunk_id=str(chunk_id),
+                    product_name=str(product_name) if product_name else None,
+                    effective_date=str(effective_date) if effective_date else None,
+                    document_type=str(document_type) if document_type else None,
+                    status=str(status) if status else None,
+                )
+                session.add(record)
+                inserted += 1
+            except Exception:
+                # 单条失败不影响整体
+                continue
+
+        await session.commit()
+        await db_manager.close_session(session)
+        logging.getLogger(__name__).info(f"document_metadata 新增 {inserted} 条记录")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"结构化元数据写入失败: {e}")
 
 
