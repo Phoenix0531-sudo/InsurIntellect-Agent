@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field(default="", description="OpenAI API密钥")
     OPENAI_BASE_URL: str = Field(default="https://api.siliconflow.cn/v1", description="OpenAI API基础URL")
     OPENAI_MODEL: str = Field(default="Qwen/Qwen2.5-7B-Instruct", description="OpenAI模型")
-    OPENAI_EMBEDDING_MODEL: str = Field(default="BAAI/bge-m3", description="嵌入模型")
+    OPENAI_EMBEDDING_MODEL: str = Field(default="hf:models/finetuned_embedding_v1", description="嵌入模型")
     OPENAI_MAX_TOKENS: int = Field(default=1000, description="最大令牌数")
     OPENAI_TEMPERATURE: float = Field(default=0.7, description="温度参数")
     
@@ -67,10 +67,6 @@ class Settings(BaseSettings):
 
     # 查询重写配置（攻关任务二）
     ENABLE_QUERY_REWRITING: bool = Field(default=False, description="启用口语化查询意图转换引擎")
-    ONTOLOGY_JSON_PATH: str = Field(default="./tools/insurance_ontology.json", description="保险术语本体库JSON路径")
-
-    # 查询重写配置（攻关任务二）
-    ENABLE_QUERY_REWRITING: bool = Field(default=False, description="启用口语化查询意图转换")
     ONTOLOGY_JSON_PATH: str = Field(default="tools/insurance_ontology.json", description="保险术语本体库JSON路径")
     
     # 安全配置
@@ -111,6 +107,18 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: Optional[str] = Field(default=None, description="Celery代理URL")
     CELERY_RESULT_BACKEND: Optional[str] = Field(default=None, description="Celery结果后端")
     
+    # LLM 并发与可靠性控制
+    LLM_MAX_CONCURRENCY: int = Field(default=20, description="LLM 并发限制（全局Semaphore）")
+    LLM_MAX_RETRIES: int = Field(default=3, description="LLM 最大重试次数（含初次调用）")
+    LLM_BACKOFF_BASE: float = Field(default=0.25, description="LLM 退避基准秒")
+    LLM_BACKOFF_FACTOR: float = Field(default=2.0, description="LLM 退避增长因子")
+    LLM_BACKOFF_MAX: float = Field(default=2.5, description="LLM 最大退避秒")
+    LLM_CIRCUIT_FAILURE_THRESHOLD: int = Field(default=10, description="LLM 熔断失败阈值")
+    LLM_CIRCUIT_RESET_TIMEOUT: int = Field(default=30, description="LLM 熔断冷却秒")
+    # ChromaDB 同步调用线程池大小（用于 asyncio.run_in_executor 包装）
+    CHROMA_THREAD_MAX_WORKERS: int = Field(default=32, description="ChromaDB 同步调用线程池大小")
+    # 异步数据库URL（postgresql+asyncpg）
+    DATABASE_URL_ASYNC: str = Field(default="", description="异步数据库URL（postgresql+asyncpg...）")
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

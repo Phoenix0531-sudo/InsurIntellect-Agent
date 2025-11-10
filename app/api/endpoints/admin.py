@@ -7,8 +7,8 @@ import shutil
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, desc, delete
 
 from app.core.database import get_db
 from app.core.app_logging import get_logger
@@ -79,7 +79,7 @@ async def get_system_info(request: Request):
 @router.get("/system/metrics", summary="获取系统指标")
 async def get_system_metrics(
     hours: int = 24,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """获取系统性能指标"""
     try:
@@ -88,10 +88,16 @@ async def get_system_metrics(
         start_time = end_time - timedelta(hours=hours)
         
         # 查询系统指标
-        metrics = db.query(SystemMetrics).filter(
-            SystemMetrics.timestamp >= start_time,
-            SystemMetrics.timestamp <= end_time
-        ).order_by(desc(SystemMetrics.timestamp)).all()
+        stmt = (
+            select(SystemMetrics)
+            .where(
+                SystemMetrics.timestamp >= start_time,
+                SystemMetrics.timestamp <= end_time,
+            )
+            .order_by(desc(SystemMetrics.timestamp))
+        )
+        result = await db.execute(stmt)
+        metrics = result.scalars().all()
         
         if not metrics:
             return {
@@ -151,7 +157,7 @@ async def system_cleanup(
     cleanup_temp: bool = False,
     cleanup_old_queries: bool = False,
     days_to_keep: int = 30,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     执行系统清理操作
@@ -229,16 +235,18 @@ async def system_cleanup(
         if cleanup_old_queries:
             try:
                 cutoff_date = datetime.utcnow() - timedelta(days=days_to_keep)
-                
-                old_queries = db.query(QueryHistory).filter(
+                count_stmt = (
+                    select(func.count()).select_from(QueryHistory).where(
+                        QueryHistory.created_time < cutoff_date
+                    )
+                )
+                old_queries = (await db.execute(count_stmt)).scalar() or 0
+
+                delete_stmt = delete(QueryHistory).where(
                     QueryHistory.created_time < cutoff_date
-                ).count()
-                
-                db.query(QueryHistory).filter(
-                    QueryHistory.created_time < cutoff_date
-                ).delete()
-                
-                db.commit()
+                )
+                await db.execute(delete_stmt)
+                await db.commit()
                 
                 cleanup_results["old_queries_cleaned"] = True
                 cleanup_results["details"].append(
@@ -247,7 +255,10 @@ async def system_cleanup(
                 
             except Exception as e:
                 cleanup_results["details"].append(f"清理旧查询记录失败: {e}")
-                db.rollback()
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
         
         logger.info(f"系统清理完成: {cleanup_results}")
         
@@ -259,32 +270,48 @@ async def system_cleanup(
 
 
 @router.get("/documents/statistics", summary="获取文档统计")
-async def get_document_statistics(db: Session = Depends(get_db)):
+async def get_document_statistics(db: AsyncSession = Depends(get_db)):
     """获取文档相关统计信息"""
     try:
         # 文档统计
-        total_documents = db.query(Document).count()
-        processed_documents = db.query(Document).filter(Document.is_processed == True).count()
-        failed_documents = db.query(Document).filter(Document.processing_status == "failed").count()
+        total_documents = (await db.execute(select(func.count()).select_from(Document))).scalar() or 0
+        processed_documents = (
+            await db.execute(
+                select(func.count()).select_from(Document).where(Document.is_processed == True)
+            )
+        ).scalar() or 0
+        failed_documents = (
+            await db.execute(
+                select(func.count()).select_from(Document).where(Document.processing_status == "failed")
+            )
+        ).scalar() or 0
         
         # 文档大小统计
-        total_size = db.query(func.sum(Document.file_size)).scalar() or 0
-        avg_size = db.query(func.avg(Document.file_size)).scalar() or 0
+        total_size = (
+            await db.execute(select(func.sum(Document.file_size)))
+        ).scalar() or 0
+        avg_size = (
+            await db.execute(select(func.avg(Document.file_size)))
+        ).scalar() or 0
         
         # 文档块统计
-        total_chunks = db.query(DocumentChunk).count()
+        total_chunks = (
+            await db.execute(select(func.count()).select_from(DocumentChunk))
+        ).scalar() or 0
         avg_chunks_per_doc = total_chunks / max(processed_documents, 1)
         
         # 按状态分组统计
-        status_stats = db.query(
-            Document.processing_status,
-            func.count(Document.id)
-        ).group_by(Document.processing_status).all()
+        status_stmt = (
+            select(Document.processing_status, func.count(Document.id))
+            .group_by(Document.processing_status)
+        )
+        status_stats = (await db.execute(status_stmt)).all()
         
         # 最近上传的文档
-        recent_documents = db.query(Document).order_by(
-            desc(Document.upload_time)
-        ).limit(10).all()
+        recent_stmt = (
+            select(Document).order_by(desc(Document.upload_time)).limit(10)
+        )
+        recent_documents = (await db.execute(recent_stmt)).scalars().all()
         
         return {
             "summary": {
@@ -320,7 +347,7 @@ async def get_document_statistics(db: Session = Depends(get_db)):
 @router.get("/queries/analytics", summary="获取查询分析")
 async def get_query_analytics(
     days: int = 30,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """获取查询分析数据"""
     try:
@@ -329,55 +356,76 @@ async def get_query_analytics(
         start_date = end_date - timedelta(days=days)
         
         # 基础统计
-        total_queries = db.query(QueryHistory).filter(
-            QueryHistory.created_time >= start_date
-        ).count()
+        total_queries = (
+            await db.execute(
+                select(func.count()).select_from(QueryHistory).where(
+                    QueryHistory.created_time >= start_date
+                )
+            )
+        ).scalar() or 0
         
-        avg_response_time = db.query(func.avg(QueryHistory.response_time)).filter(
-            QueryHistory.created_time >= start_date
+        avg_response_time = (
+            await db.execute(
+                select(func.avg(QueryHistory.response_time)).where(
+                    QueryHistory.created_time >= start_date
+                )
+            )
         ).scalar() or 0
         
         # 按查询类型统计
-        type_stats = db.query(
-            QueryHistory.model_used,
-            func.count(QueryHistory.id),
-            func.avg(QueryHistory.response_time)
-        ).filter(
-            QueryHistory.created_time >= start_date
-        ).group_by(QueryHistory.model_used).all()
+        type_stmt = (
+            select(
+                QueryHistory.model_used,
+                func.count(QueryHistory.id),
+                func.avg(QueryHistory.response_time),
+            )
+            .where(QueryHistory.created_time >= start_date)
+            .group_by(QueryHistory.model_used)
+        )
+        type_stats = (await db.execute(type_stmt)).all()
         
         # 用户满意度统计
-        feedback_stats = db.query(
-            QueryHistory.rating,
-            func.count(QueryHistory.id)
-        ).filter(
-            QueryHistory.created_time >= start_date,
-            QueryHistory.rating.isnot(None)
-        ).group_by(QueryHistory.rating).all()
+        feedback_stmt = (
+            select(QueryHistory.rating, func.count(QueryHistory.id))
+            .where(
+                QueryHistory.created_time >= start_date,
+                QueryHistory.rating.isnot(None),
+            )
+            .group_by(QueryHistory.rating)
+        )
+        feedback_stats = (await db.execute(feedback_stmt)).all()
         
-        avg_rating = db.query(func.avg(QueryHistory.rating)).filter(
-            QueryHistory.created_time >= start_date,
-            QueryHistory.rating.isnot(None)
+        avg_rating = (
+            await db.execute(
+                select(func.avg(QueryHistory.rating)).where(
+                    QueryHistory.created_time >= start_date,
+                    QueryHistory.rating.isnot(None),
+                )
+            )
         ).scalar() or 0
         
         # 每日查询量统计
-        daily_stats = db.query(
-            func.date(QueryHistory.created_time).label('date'),
-            func.count(QueryHistory.id).label('count'),
-            func.avg(QueryHistory.response_time).label('avg_time')
-        ).filter(
-            QueryHistory.created_time >= start_date
-        ).group_by(func.date(QueryHistory.created_time)).all()
+        daily_stmt = (
+            select(
+                func.date(QueryHistory.created_time).label('date'),
+                func.count(QueryHistory.id).label('count'),
+                func.avg(QueryHistory.response_time).label('avg_time'),
+            )
+            .where(QueryHistory.created_time >= start_date)
+            .group_by(func.date(QueryHistory.created_time))
+        )
+        daily_stats = (await db.execute(daily_stmt)).all()
         
         # 最常见的查询
-        common_queries = db.query(
-            QueryHistory.query,
-            func.count(QueryHistory.id).label('frequency')
-        ).filter(
-            QueryHistory.created_time >= start_date
-        ).group_by(QueryHistory.query).order_by(
-            desc('frequency')
-        ).limit(10).all()
+        freq = func.count(QueryHistory.id).label('frequency')
+        common_stmt = (
+            select(QueryHistory.query, freq)
+            .where(QueryHistory.created_time >= start_date)
+            .group_by(QueryHistory.query)
+            .order_by(desc(freq))
+            .limit(10)
+        )
+        common_queries = (await db.execute(common_stmt)).all()
         
         return {
             "time_range": {
@@ -433,7 +481,7 @@ async def create_system_backup(
     include_documents: bool = True,
     include_database: bool = True,
     include_vector_db: bool = False,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """创建系统备份"""
     try:

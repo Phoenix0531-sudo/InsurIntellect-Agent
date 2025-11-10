@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 InsurIntellect Agent - RAG Workflow Engine
 =========================================
@@ -20,8 +20,10 @@ Version: 1.0.0
 import os
 import json
 import logging
-from typing import Dict, List, Any
+from app.core.app_logging import get_logger as app_get_logger
+from typing import Dict, List, Any, Tuple
 from datetime import datetime
+import asyncio
 
 # 在导入langchain之前设置环境变量
 from app.core.config import settings
@@ -29,7 +31,6 @@ os.environ["OPENAI_API_KEY"] = settings.SILICONFLOW_API_KEY  # 使用硅基流�
 os.environ["OPENAI_BASE_URL"] = settings.SILICONFLOW_BASE_URL  # 使用硅基流动的基础URL
 
 from langchain_openai import ChatOpenAI
-from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
 # 新增导入：用于构建提示与解析输出（AI判别辅助）
@@ -43,6 +44,9 @@ from app.prompts import (
     REPORT_AUTHOR_PROMPT
 )
 from app.core.timeliness import compute_timeliness_score
+from app.core.fusion import reciprocal_rank_fusion
+import jieba
+from app.services.embedding_service import EmbeddingService
 
 # Configure logging
 logging.basicConfig(
@@ -83,13 +87,15 @@ class InsurIntellectAgent:
             )
             logger.info("ChatOpenAI LLM初始化成功")
             
-            # 初始化嵌入模型
-            self.embeddings = OpenAIEmbeddings(
-                model=settings.OPENAI_EMBEDDING_MODEL,
-                api_key=settings.SILICONFLOW_API_KEY,  # 显式传递API密钥
-                base_url=settings.SILICONFLOW_BASE_URL  # 显式传递基础URL
-            )
-            logger.info("嵌入模型初始化成功")
+            # 初始化嵌入服务（双模式）
+            self.embedding_service = EmbeddingService(model_name=settings.OPENAI_EMBEDDING_MODEL)
+            self.embeddings = self.embedding_service.embedding_function
+            logger.info("嵌入服务初始化成功（双模式）")
+            # 额外记录到应用主日志记录器，确保写入 logs/app.log
+            try:
+                app_get_logger("insurintellect").info("嵌入服务初始化成功（双模式）")
+            except Exception:
+                pass
             
             # 初始化向量数据库
             try:
@@ -116,6 +122,11 @@ class InsurIntellectAgent:
                 search_kwargs={"k": settings.MAX_RETRIEVED_CHUNKS * 2}  # 初步检索更多文档供后续筛选
             )
             logger.info(f"ChromaDB检索器初始化成功,检索路径: {settings.CHROMA_PERSIST_DIRECTORY}")
+
+            # BM25 资源占位
+            self.bm25_index = None
+            self.bm25_chunk_map = {}
+            self.bm25_available = False
 
             # 新增：加载并缓存监管文件，以便快速访问和后续AI判断参考
             # 说明：优先使用向量库检索器的 get 能力，失败时回退到底层 Chroma collection
@@ -539,6 +550,306 @@ class InsurIntellectAgent:
         except Exception as e:
             logger.warning(f"判断文档与监管查询关联性时出错: {e}")
             return False
+
+    def build_context(self, user_query: str) -> Dict[str, Any]:
+        """
+        构建 RAG 上下文（不生成最终答案）。
+
+        执行步骤：
+        1. 查询架构师重写查询
+        2. 初步检索候选文档
+        3. 首席评审员筛选最相关文档
+        4. 动态排序与 Top-K 截断
+
+        返回：{
+          "rewritten_query": str,
+          "context": str,            # 拼接后的上下文文本
+          "retrieved_chunks": list,  # 结构化的片段列表（用于响应与持久化）
+        }
+        """
+        try:
+            # 步骤1：查询架构师重写查询
+            architect_result = self.run_query_architect(user_query)
+            rewritten_query = architect_result.get("rewritten_query", user_query)
+            standalone_query = rewritten_query
+
+            # 步骤2：初步检索
+            logger.info(f"构建上下文：使用重写查询进行检索: {rewritten_query}")
+            retrieved_docs = self.retriever.invoke(rewritten_query)
+            if not retrieved_docs:
+                logger.warning("未检索到相关文档")
+                # 返回空上下文，但仍带上重写查询供外层回退
+                self.last_run = {"rewritten_query": rewritten_query, "retrieved_chunks": []}
+                return {"rewritten_query": rewritten_query, "context": "", "retrieved_chunks": []}
+
+            # 步骤3：评审筛选
+            selected_docs = self.run_lead_reviewer(user_query, retrieved_docs)
+            if not selected_docs:
+                logger.warning("首席评审员未选择任何文档")
+                self.last_run = {"rewritten_query": rewritten_query, "retrieved_chunks": []}
+                return {"rewritten_query": rewritten_query, "context": "", "retrieved_chunks": []}
+
+            # 步骤4：动态排序并截断
+            sorted_docs = self._dynamic_ranking(selected_docs, standalone_query)
+            top_docs = sorted_docs[: settings.MAX_RETRIEVED_CHUNKS]
+
+            # 构建上下文字符串
+            context_parts: List[str] = []
+            for i, doc in enumerate(top_docs, 1):
+                metadata_info = []
+                if doc.metadata.get('document_title'):
+                    metadata_info.append(f"文档标题: {doc.metadata['document_title']}")
+                if doc.metadata.get('product_name'):
+                    metadata_info.append(f"产品名称: {doc.metadata['product_name']}")
+                if doc.metadata.get('effective_date'):
+                    metadata_info.append(f"生效日期: {doc.metadata['effective_date']}")
+                if doc.metadata.get('document_type'):
+                    metadata_info.append(f"文档类型: {doc.metadata['document_type']}")
+                metadata_str = " | ".join(metadata_info) if metadata_info else "无元数据"
+                context_parts.append(f"【相关文档{i}】\n{metadata_str}\n内容: {doc.page_content}\n")
+            final_context = "\n".join(context_parts)
+
+            # 审计输出：结构化片段
+            retrieved_chunks: List[Dict[str, Any]] = []
+            try:
+                for doc in top_docs:
+                    md = doc.metadata or {}
+                    rd = md.get("ranking_details", {})
+                    retrieved_chunks.append({
+                        "chunk_id": md.get("chunk_id"),
+                        "document_id": md.get("document_id"),
+                        "document_name": md.get("document_title") or md.get("filename") or md.get("source"),
+                        "content": doc.page_content,
+                        "page_number": md.get("page_number"),
+                        "similarity_score": rd.get("original_similarity"),
+                        "metadata": {
+                            "ranking_details": rd,
+                            "document_type": md.get("document_type"),
+                            "product_name": md.get("product_name"),
+                            "effective_date": md.get("effective_date"),
+                            "expiry_date": md.get("expiry_date"),
+                            "abolition_date": md.get("abolition_date"),
+                            "keywords_json": md.get("keywords_json"),
+                        },
+                    })
+                self.last_run = {
+                    "rewritten_query": rewritten_query,
+                    "retrieved_chunks": retrieved_chunks,
+                }
+            except Exception:
+                self.last_run = {
+                    "rewritten_query": rewritten_query,
+                    "retrieved_chunks": [],
+                }
+
+            return {
+                "rewritten_query": rewritten_query,
+                "context": final_context,
+                "retrieved_chunks": retrieved_chunks,
+            }
+        except Exception as e:
+            logger.exception("构建上下文失败")
+            self.last_run = {"rewritten_query": user_query, "retrieved_chunks": []}
+            return {"rewritten_query": user_query, "context": "", "retrieved_chunks": []}
+
+    async def abuild_context(self, user_query: str) -> Dict[str, Any]:
+        """
+        异步版本：构建 RAG 上下文（不生成最终答案）。
+
+        混合检索：并发执行向量检索与BM25检索，RRF融合后重取Top-K。
+
+        返回：{
+          "rewritten_query": str,
+          "context": str,
+          "retrieved_chunks": list,
+        }
+        """
+        try:
+            # 步骤1：查询架构师重写查询（同步 -> 线程）
+            architect_result = await asyncio.to_thread(self.run_query_architect, user_query)
+            rewritten_query = architect_result.get("rewritten_query", user_query)
+            standalone_query = rewritten_query
+
+            # 预先异步获取查询嵌入（双模式服务）（I2.1）
+            try:
+                query_embedding = await self.embedding_service.aembed_query(rewritten_query)
+            except Exception:
+                query_embedding = None
+
+            # 步骤2：并发检索（向量检索 n=50 与 BM25 n=50）
+            logger.info(f"(async) 混合检索：向量与BM25并发，查询: {rewritten_query}")
+
+            async def _vector_search_k50() -> Tuple[List[Tuple[Document, float]], Dict[str, float], List[str]]:
+                try:
+                    results = await asyncio.to_thread(self.vectorstore.similarity_search_with_score, rewritten_query, k=50)
+                    ids: List[str] = []
+                    score_map: Dict[str, float] = {}
+                    for doc, score in results:
+                        cid = (doc.metadata or {}).get("chunk_id")
+                        if cid:
+                            ids.append(cid)
+                            score_map[cid] = float(score)
+                    return results, score_map, ids
+                except Exception:
+                    # 回退：使用底层 Chroma collection 查询距离
+                    try:
+                        collection = self.vectorstore._collection  # type: ignore[attr-defined]
+                        # 使用预先计算的查询向量（若不可用则实时计算）
+                        emb = query_embedding if query_embedding is not None else await self.embedding_service.aembed_query(rewritten_query)
+                        payload = await asyncio.to_thread(
+                            collection.query,
+                            query_embeddings=[emb],
+                            n_results=50,
+                            include=["distances", "documents", "metadatas", "embeddings"],
+                        )
+                        docs: List[Tuple[Document, float]] = []
+                        score_map: Dict[str, float] = {}
+                        ids: List[str] = []
+                        for i in range(len(payload.get("ids", [[]])[0])):
+                            cid = payload["ids"][0][i]
+                            text = payload["documents"][0][i]
+                            md = payload["metadatas"][0][i]
+                            dist = payload["distances"][0][i]
+                            # 以(1 - 距离)作为相似度近似
+                            score = 1.0 - float(dist)
+                            d = Document(page_content=text, metadata=md)
+                            docs.append((d, score))
+                            ids.append(cid)
+                            score_map[cid] = score
+                        return docs, score_map, ids
+                    except Exception:
+                        return [], {}, []
+
+            async def _bm25_search_k50() -> Tuple[List[str], Dict[str, float]]:
+                if not self.bm25_available or not self.bm25_index:
+                    return [], {}
+                try:
+                    tokens = [t.strip() for t in jieba.lcut(" ".join(rewritten_query.split())) if t.strip()]
+                except Exception:
+                    tokens = [t.strip() for t in rewritten_query.split() if t.strip()]
+                try:
+                    model = self.bm25_index.get("bm25")
+                    ids = self.bm25_index.get("ids") or []
+                    scores_all = model.get_scores(tokens) if hasattr(model, "get_scores") else []
+                    scored = [(ids[i], float(scores_all[i])) for i in range(len(ids))]
+                    scored.sort(key=lambda x: x[1], reverse=True)
+                    top_scored = scored[:50]
+                    bm25_ids = [cid for cid, _ in top_scored]
+                    bm25_scores = {cid: s for cid, s in top_scored}
+                    return bm25_ids, bm25_scores
+                except Exception:
+                    return [], {}
+
+            (vector_docs_scores, vector_score_map, vector_ids), (bm25_ids, bm25_score_map) = await asyncio.gather(
+                _vector_search_k50(),
+                _bm25_search_k50(),
+            )
+
+            if not vector_ids and not bm25_ids:
+                logger.warning("(async) 未检索到任何结果")
+                self.last_run = {"rewritten_query": rewritten_query, "retrieved_chunks": []}
+                return {"rewritten_query": rewritten_query, "context": "", "retrieved_chunks": []}
+
+            # 步骤3：RRF融合（k=60），支持纯向量回退
+            lists_to_fuse: List[List[str]] = []
+            if vector_ids:
+                lists_to_fuse.append(vector_ids)
+            if bm25_ids:
+                lists_to_fuse.append(bm25_ids)
+            fused_ids, rrf_scores = reciprocal_rank_fusion(lists_to_fuse, k=60, top_n=None)
+
+            # 步骤4：重取 Top-K 文档块
+            top_k = settings.MAX_RETRIEVED_CHUNKS
+            top_ids = fused_ids[: top_k]
+            top_docs = await asyncio.to_thread(self._refetch_chunks_by_ids, top_ids)
+
+            # 构建上下文字符串（纯CPU操作，直接在协程内执行）
+            context_parts: List[str] = []
+            for i, doc in enumerate(top_docs, 1):
+                metadata_info = []
+                if doc.metadata.get('document_title'):
+                    metadata_info.append(f"文档标题: {doc.metadata['document_title']}")
+                if doc.metadata.get('product_name'):
+                    metadata_info.append(f"产品名称: {doc.metadata['product_name']}")
+                if doc.metadata.get('effective_date'):
+                    metadata_info.append(f"生效日期: {doc.metadata['effective_date']}")
+                if doc.metadata.get('document_type'):
+                    metadata_info.append(f"文档类型: {doc.metadata['document_type']}")
+                metadata_str = " | ".join(metadata_info) if metadata_info else "无元数据"
+                context_parts.append(f"【相关文档{i}】\n{metadata_str}\n内容: {doc.page_content}\n")
+            final_context = "\n".join(context_parts)
+
+            # 审计输出：结构化片段（添加 vector_score / bm25_score / rrf_score）
+            retrieved_chunks: List[Dict[str, Any]] = []
+            try:
+                for doc in top_docs:
+                    md = doc.metadata or {}
+                    cid = md.get("chunk_id")
+                    md["vector_score"] = vector_score_map.get(cid)
+                    md["bm25_score"] = bm25_score_map.get(cid)
+                    md["rrf_score"] = rrf_scores.get(cid)
+                    rd = md.get("ranking_details", {})
+                    retrieved_chunks.append({
+                        "chunk_id": md.get("chunk_id"),
+                        "document_id": md.get("document_id"),
+                        "document_name": md.get("document_title") or md.get("filename") or md.get("source"),
+                        "content": doc.page_content,
+                        "page_number": md.get("page_number"),
+                        "similarity_score": rd.get("original_similarity"),
+                        "metadata": {
+                            "ranking_details": rd,
+                            "document_type": md.get("document_type"),
+                            "product_name": md.get("product_name"),
+                            "effective_date": md.get("effective_date"),
+                            "expiry_date": md.get("expiry_date"),
+                            "abolition_date": md.get("abolition_date"),
+                            "keywords_json": md.get("keywords_json"),
+                            "vector_score": md.get("vector_score"),
+                            "bm25_score": md.get("bm25_score"),
+                            "rrf_score": md.get("rrf_score"),
+                        },
+                    })
+                self.last_run = {
+                    "rewritten_query": rewritten_query,
+                    "retrieved_chunks": retrieved_chunks,
+                }
+            except Exception:
+                self.last_run = {
+                    "rewritten_query": rewritten_query,
+                    "retrieved_chunks": [],
+                }
+
+            return {
+                "rewritten_query": rewritten_query,
+                "context": final_context,
+                "retrieved_chunks": retrieved_chunks,
+            }
+        except Exception:
+            logger.exception("(async) 构建上下文失败")
+            self.last_run = {"rewritten_query": user_query, "retrieved_chunks": []}
+            return {"rewritten_query": user_query, "context": "", "retrieved_chunks": []}
+
+    def set_bm25_resources(self, index_payload: Any, chunk_map: Dict[str, str]) -> None:
+        try:
+            self.bm25_index = index_payload
+            self.bm25_chunk_map = chunk_map or {}
+            self.bm25_available = bool(index_payload)
+            logger.info("BM25 资源已注入到 RAGWorkflow")
+        except Exception as e:
+            logger.warning(f"BM25 资源注入失败: {e}")
+
+    def _refetch_chunks_by_ids(self, chunk_ids: List[str]) -> List[Document]:
+        try:
+            collection = self.vectorstore._collection  # type: ignore[attr-defined]
+            payload = collection.get(ids=chunk_ids, include=["documents", "metadatas"])
+            out: List[Document] = []
+            for i in range(len(payload.get("ids", []))):
+                text = payload.get("documents", [None])[i]
+                md = payload.get("metadatas", [None])[i]
+                out.append(Document(page_content=text, metadata=md))
+            return out
+        except Exception:
+            return []
     
     def answer(self, user_query: str) -> str:
         """
@@ -676,6 +987,11 @@ def reset_agent():
     """重置智能代理实例, 强制重新初始化"""
     if hasattr(get_agent, '_instance'):
         get_agent._instance = None
+
+
+def set_bm25_resources(index_payload: Any, chunk_map: Dict[str, str]) -> None:
+    agent = get_agent()
+    agent.set_bm25_resources(index_payload, chunk_map)
 
 
 if __name__ == "__main__":

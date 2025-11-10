@@ -205,6 +205,17 @@
                             </svg>
                         </button>
                     </div>
+                    <!-- 流式开关与状态 -->
+                    <div class="flex items-center justify-between mt-2 px-2">
+                        <label class="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-300">
+                            <input type="checkbox" id="enableStreaming" class="mr-1" checked />
+                            <span>启用流式输出</span>
+                        </label>
+                        <div id="streamStatus" class="text-xs text-gray-500 dark:text-gray-400" style="display:none;">
+                            <i class="fas fa-spinner fa-spin mr-1"></i> 流式进行中...
+                            <button id="cancelStreamBtn" class="ml-2 underline">取消</button>
+                        </div>
+                    </div>
                 </div>
 
         </div>

@@ -15,10 +15,12 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.database import init_db, async_engine
 from app.api.routes import api_router
 from app.core.structured_logger import get_structured_logger
 from app.core.auto_restart import setup_auto_restart
+import pickle
+import json
 
 # 设置结构化日志
 structured_logger = get_structured_logger("insurintellect", "logs/app.log")
@@ -81,11 +83,48 @@ async def lifespan(app: FastAPI):
         monitor.start_monitoring()
         logger.info("自动重启监控已启动")
         structured_logger.info("auto_restart_monitoring_started")
-    
+
+    # 启动时加载并缓存 BM25 索引与映射
+    try:
+        bm25_index_path = Path("data/processed/bm25_index.pkl")
+        bm25_chunk_map_path = Path("data/processed/bm25_chunk_map.json")
+        app.state.bm25_index = None
+        app.state.bm25_chunk_map = {}
+        if bm25_index_path.exists() and bm25_chunk_map_path.exists():
+            with bm25_index_path.open("rb") as pf:
+                app.state.bm25_index = pickle.load(pf)
+            with bm25_chunk_map_path.open("r", encoding="utf-8") as jf:
+                app.state.bm25_chunk_map = json.load(jf)
+            logger.info("BM25 索引与映射已在启动阶段加载并缓存")
+            # 注入到 RAG 工作流全局资源
+            try:
+                from app.core.rag_workflow import set_bm25_resources
+                set_bm25_resources(app.state.bm25_index, app.state.bm25_chunk_map)
+            except Exception as e:
+                logger.warning(f"注入 BM25 资源到 RAGWorkflow 失败: {e}")
+        else:
+            logger.warning("BM25 索引未加载，将以纯向量模式运行。")
+    except Exception as e:
+        logger.warning(f"BM25 索引加载失败，将以纯向量模式运行。错误: {e}")
+
     yield
-    
+
     # 关闭时执行
     logger.info("InsurIntellect Agent 正在关闭...")
+    # 关闭异步数据库引擎
+    try:
+        logger.info("正在关闭异步数据库引擎...")
+        await async_engine.dispose()
+        logger.info("异步数据库引擎已关闭")
+    except Exception as e:
+        logger.warning(f"关闭异步数据库引擎失败: {e}")
+    # 关闭 ChromaDB 线程池与持久化客户端
+    try:
+        from app.core.chromadb_manager import chroma_manager
+        chroma_manager.close()
+        logger.info("ChromaDB 资源已关闭")
+    except Exception as e:
+        logger.warning(f"关闭 ChromaDB 资源失败: {e}")
     structured_logger.log_system_event("application_shutdown")
 
 

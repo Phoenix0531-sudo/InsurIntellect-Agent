@@ -5,7 +5,8 @@
 import asyncio
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
 from app.core.database import get_db, db_manager
 from app.core.app_logging import get_logger
@@ -16,7 +17,7 @@ router = APIRouter()
 
 
 @router.get("/", response_model=HealthCheck, summary="基础健康检查")
-async def health_check(request: Request, db: Session = Depends(get_db)):
+async def health_check(request: Request):
     """
     基础健康检查端点
     检查数据库、向量数据库和 LLM 服务的状态
@@ -25,7 +26,7 @@ async def health_check(request: Request, db: Session = Depends(get_db)):
         # 检查数据库
         db_status = True
         try:
-            db_status = db_manager.health_check()
+            db_status = await db_manager.health_check()
         except Exception as e:
             logger.warning(f"数据库检查失败: {e}")
             db_status = False
@@ -76,7 +77,7 @@ async def health_check(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/stats", response_model=SystemStats, summary="系统统计信息")
-async def get_system_stats(request: Request, db: Session = Depends(get_db)):
+async def get_system_stats(request: Request, db: AsyncSession = Depends(get_db)):
     """
     获取系统统计信息：包括文档数量、查询数量、响应时间等
     """
@@ -86,16 +87,24 @@ async def get_system_stats(request: Request, db: Session = Depends(get_db)):
         import os
 
         # 统计文档数量
-        total_documents = db.query(Document).count()
+        total_documents = (
+            await db.execute(select(func.count()).select_from(Document))
+        ).scalar() or 0
 
         # 统计文档块数量
-        total_chunks = db.query(DocumentChunk).count()
+        total_chunks = (
+            await db.execute(select(func.count()).select_from(DocumentChunk))
+        ).scalar() or 0
 
         # 统计查询数量
-        total_queries = db.query(QueryHistory).count()
+        total_queries = (
+            await db.execute(select(func.count()).select_from(QueryHistory))
+        ).scalar() or 0
 
         # 计算平均响应时间
-        avg_response_time = db.query(func.avg(QueryHistory.response_time)).scalar() or 0.0
+        avg_response_time = (
+            await db.execute(select(func.avg(QueryHistory.response_time)))
+        ).scalar() or 0.0
 
         # 计算存储使用量
         storage_used = 0

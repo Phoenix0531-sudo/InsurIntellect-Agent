@@ -149,6 +149,9 @@ def main():
     # 6. 新增：历史计数随 ask 增加的自检
     history_increase_ok = test_history_count_increases_after_ask()
 
+    # 7. 新增：session_id 持久化与改写元数据键存在的自检
+    session_meta_ok = test_session_id_and_rewriting_metadata_saved()
+
     # 总结
     logger.info("\n" + "=" * 50)
     logger.info("📊 测试结果总结:")
@@ -161,8 +164,9 @@ def main():
         + (1 if query_result else 0)
         + (1 if ask_query_id_ok else 0)
         + (1 if history_increase_ok else 0)
+        + (1 if session_meta_ok else 0)
     )
-    total_tests = basic_total + 5
+    total_tests = basic_total + 6
 
     logger.info(f"基础端点: {basic_passed}/{basic_total}")
     logger.info(f"主健康检查: {'1/1' if health_result else '0/1'}")
@@ -170,6 +174,7 @@ def main():
     logger.info(f"查询端点: {'1/1' if query_result else '0/1'}")
     logger.info(f"异常路径 query_id: {'1/1' if ask_query_id_ok else '0/1'}")
     logger.info(f"历史计数递增: {'1/1' if history_increase_ok else '0/1'}")
+    logger.info(f"session_id 与改写元数据: {'1/1' if session_meta_ok else '0/1'}")
     logger.info("-" * 50)
     logger.info(f"🎯 总体结果: {total_passed}/{total_tests} 测试通过")
 
@@ -267,6 +272,58 @@ def test_history_count_increases_after_ask() -> bool:
             logger.warning(f"⚠️ 历史未找到对应 ID: {qid}（可能被截断或分页）")
 
     return inc_ok and (id_ok or not isinstance(qid, int))
+
+
+def test_session_id_and_rewriting_metadata_saved() -> bool:
+    """自检：发送 session_id，验证历史持久化与改写元数据键存在。
+
+    说明：
+    - 无需依赖改写开启；仅断言响应详情的 metadata 中存在 'rewriting_metadata' 键，
+      该键由数据库列 QueryHistory.rewriting_metadata_json 解析产生；
+    - 始终断言 query_id 持久化并可通过详情接口获取。
+    """
+    logger.info("\n🔍 自检：session_id 持久化与改写元数据键存在 ...")
+    try:
+        sid = f"test-session-{int(time.time())}"
+        payload = {
+            "question": "多轮会话测试：校验 session 与改写元数据",
+            "query_type": "general",
+            "session_id": sid
+        }
+        r = requests.post(
+            f"{BASE_URL}/api/v1/queries/ask",
+            json=payload,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            timeout=30,
+        )
+        if r.status_code != 200:
+            logger.error(f"❌ /queries/ask 返回 {r.status_code}")
+            return False
+        body = r.json()
+        qid = body.get("query_id")
+        if not isinstance(qid, int) or qid <= 0:
+            logger.error(f"❌ 非法 query_id: {qid}")
+            return False
+
+        # 查询详情以检查 metadata
+        d = requests.get(f"{BASE_URL}/api/v1/queries/history/{qid}", timeout=20)
+        if d.status_code != 200:
+            logger.error(f"❌ /queries/history/{qid} 返回 {d.status_code}")
+            return False
+        detail = d.json()
+        metadata = detail.get("metadata") or {}
+        has_rewriting_key = "rewriting_metadata" in metadata
+        has_rewritten_key = "rewritten_query" in metadata
+
+        if has_rewriting_key and has_rewritten_key:
+            logger.info("✅ metadata 中包含改写相关键（来源于 rewriting_metadata_json）")
+            return True
+        else:
+            logger.error("❌ metadata 缺少改写相关键")
+            return False
+    except Exception as e:
+        logger.error(f"❌ 自检异常: {e}")
+        return False
 
 
 if __name__ == "__main__":

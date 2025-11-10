@@ -49,5 +49,5 @@ def force_reset_chromadb() -> bool:
 
 
 if __name__ == "__main__":
-    setup_logging(level="INFO")
+    setup_logging(log_level="INFO")
     force_reset_chromadb()

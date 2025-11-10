@@ -9,7 +9,8 @@ import numpy as np
 from openai import AsyncOpenAI
 import chromadb
 from chromadb.config import Settings as ChromaSettings
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 try:
     import pinecone
 except ImportError:
@@ -18,6 +19,7 @@ from app.core.config import settings
 from app.core.app_logging import get_logger
 from app.models.schemas import RetrievedChunk
 from app.models.database_models import DocumentChunk
+from app.services.embedding_service import EmbeddingService
 
 logger = get_logger(__name__)
 
@@ -28,13 +30,17 @@ class VectorStoreService:
     def __init__(self):
         self.client = None
         self.collection = None
-        self.embedding_model = settings.EMBEDDING_MODEL
-        
+        # 统一读取嵌入模型配置：优先使用 OPENAI_EMBEDDING_MODEL，其次兼容 EMBEDDING_MODEL
+        self.embedding_model = (settings.OPENAI_EMBEDDING_MODEL or settings.EMBEDDING_MODEL)
+
         # 初始化OpenAI客户端
         self.openai_client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,
             base_url=settings.OPENAI_BASE_URL
         )
+        # 初始化嵌入服务（双模式，I1.3）
+        # 根据前缀 hf:/local: 加载 HuggingFaceEmbeddings，否则加载 OpenAIEmbeddings
+        self.embedding_service = EmbeddingService(model_name=self.embedding_model)
     
     async def initialize(self):
         """初始化向量数据库"""
@@ -100,23 +106,22 @@ class VectorStoreService:
     async def get_embedding(self, text: str) -> List[float]:
         """获取文本的向量嵌入"""
         try:
-            response = await self.openai_client.embeddings.create(
-                model=self.embedding_model,
-                input=text
-            )
-            return response.data[0].embedding
+            # 使用统一嵌入服务的异步接口（I1.4：同步接口线程包装）
+            embedding = await self.embedding_service.aembed_query(text)
+            return embedding
             
         except Exception as e:
             logger.error(f"获取嵌入向量失败: {e}")
             raise
     
-    async def add_document_chunks(self, db: Session, document_id: int) -> bool:
+    async def add_document_chunks(self, db: AsyncSession, document_id: int) -> bool:
         """将文档块添加到向量数据库"""
         try:
-            # 获取文档块
-            chunks = db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == document_id
-            ).all()
+            # 获取文档块（异步）
+            result = await db.execute(
+                select(DocumentChunk).where(DocumentChunk.document_id == document_id)
+            )
+            chunks = result.scalars().all()
             
             if not chunks:
                 logger.warning(f"文档 {document_id} 没有找到")
@@ -153,7 +158,7 @@ class VectorStoreService:
             # 更新数据库中的vector_id
             for i, chunk in enumerate(chunks):
                 chunk.vector_id = chunk_ids[i]
-            db.commit()
+            await db.commit()
             
             logger.info(f"成功添加 {len(chunks)} 个文档块到向量数据库")
             return True
@@ -165,11 +170,13 @@ class VectorStoreService:
     async def _add_to_chromadb(self, ids: List[str], embeddings: List[List[float]], 
                               metadatas: List[Dict], documents: List[str]):
         """添加到ChromaDB"""
-        self.collection.add(
+        from app.core.chromadb_manager import chroma_manager
+        await chroma_manager.run_in_thread(
+            self.collection.add,
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
-            documents=documents
+            documents=documents,
         )
     
     async def _add_to_pinecone(self, ids: List[str], embeddings: List[List[float]], 
@@ -201,10 +208,12 @@ class VectorStoreService:
     
     async def _search_chromadb(self, query_embedding: List[float], top_k: int) -> List[Dict[str, Any]]:
         """在 ChromaDB 中搜索"""
-        results = self.collection.query(
+        from app.core.chromadb_manager import chroma_manager
+        results = await chroma_manager.run_in_thread(
+            self.collection.query,
             query_embeddings=[query_embedding],
             n_results=top_k,
-            include=["documents", "metadatas", "distances"]
+            include=["documents", "metadatas", "distances"],
         )
         
         search_results = []
@@ -238,13 +247,14 @@ class VectorStoreService:
         
         return search_results
     
-    async def delete_document_vectors(self, db: Session, document_id: int) -> bool:
+    async def delete_document_vectors(self, db: AsyncSession, document_id: int) -> bool:
         """删除文档的向量数据"""
         try:
-            # 获取文档块的vector_id
-            chunks = db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == document_id
-            ).all()
+            # 获取文档块的vector_id（异步）
+            result = await db.execute(
+                select(DocumentChunk).where(DocumentChunk.document_id == document_id)
+            )
+            chunks = result.scalars().all()
             
             if not chunks:
                 return True
@@ -256,7 +266,8 @@ class VectorStoreService:
             
             # 从向量数据库删除
             if settings.VECTOR_DB_TYPE.lower() in ["chroma", "chromadb"]:
-                self.collection.delete(ids=vector_ids)
+                from app.core.chromadb_manager import chroma_manager
+                await chroma_manager.run_in_thread(self.collection.delete, ids=vector_ids)
             elif settings.VECTOR_DB_TYPE.lower() == "pinecone":
                 self.index.delete(ids=vector_ids)
             
@@ -274,7 +285,8 @@ class VectorStoreService:
                 if self.collection is None:
                     logger.warning("ChromaDB collection is None")
                     return {"total_vectors": 0, "type": "chromadb", "error": "collection_not_initialized"}
-                count = self.collection.count()
+                from app.core.chromadb_manager import chroma_manager
+                count = await chroma_manager.run_in_thread(self.collection.count)
                 return {"total_vectors": count, "type": "chromadb"}
             elif settings.VECTOR_DB_TYPE.lower() == "pinecone":
                 if self.index is None:

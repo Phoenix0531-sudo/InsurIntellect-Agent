@@ -1,32 +1,55 @@
 """
-数据库配置和管理模块
+数据库配置和管理模块（异步版）
 """
 
-from sqlalchemy import create_engine, MetaData
+from sqlalchemy import MetaData
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import (
+    create_async_engine,
+    async_sessionmaker,
+    AsyncSession,
+)
 from sqlalchemy.pool import StaticPool
 from app.core.config import settings
 from app.core.app_logging import get_logger
 
 logger = get_logger(__name__)
 
-# 数据库引擎配置
-if settings.DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(
-        settings.DATABASE_URL,
+
+def _derive_async_url(sync_url: str) -> str:
+    """从同步URL推导异步URL（仅支持SQLite的安全回退）。"""
+    if sync_url.startswith("sqlite:///"):
+        # sqlite:///path/to.db -> sqlite+aiosqlite:///path/to.db
+        return "sqlite+aiosqlite:///" + sync_url.replace("sqlite:///", "", 1)
+    return sync_url  # 非SQLite需通过 settings.DATABASE_URL_ASYNC 显式提供
+
+
+# 选择异步数据库URL
+ASYNC_DB_URL = settings.DATABASE_URL_ASYNC or _derive_async_url(settings.DATABASE_URL)
+
+# 异步数据库引擎配置
+if ASYNC_DB_URL.startswith("sqlite+aiosqlite"):
+    async_engine = create_async_engine(
+        ASYNC_DB_URL,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
         echo=settings.DEBUG,
     )
 else:
-    engine = create_engine(
-        settings.DATABASE_URL,
+    async_engine = create_async_engine(
+        ASYNC_DB_URL,
         echo=settings.DEBUG,
     )
 
-# 会话工厂
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# 异步会话工厂
+AsyncSessionLocal = async_sessionmaker(
+    bind=async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
+)
 
 # 基础模型与元数据
 Base = declarative_base()
@@ -34,49 +57,43 @@ metadata = MetaData()
 
 
 async def init_db():
-    """初始化数据库"""
+    """初始化数据库（异步）"""
     try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("数据库初始化完成")
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("数据库初始化完成（异步）")
     except Exception as e:
         logger.error(f"数据库初始化失败: {e}")
         raise
 
 
-def get_db():
-    """获取数据库会话"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db():
+    """获取异步数据库会话"""
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
 class DatabaseManager:
-    """数据库管理器"""
+    """数据库管理器（异步）"""
 
     def __init__(self) -> None:
-        self.engine = engine
-        self.SessionLocal = SessionLocal
+        self.engine = async_engine
+        self.SessionLocal = AsyncSessionLocal
 
-    def create_session(self):
-        """创建数据库会话"""
+    async def create_session(self) -> AsyncSession:
+        """创建异步数据库会话"""
         return self.SessionLocal()
 
-    def close_session(self, session):
-        """关闭数据库会话"""
-        session.close()
+    async def close_session(self, session: AsyncSession):
+        """关闭异步数据库会话"""
+        await session.close()
 
-    def health_check(self) -> bool:
-        """数据库健康检查"""
+    async def health_check(self) -> bool:
+        """数据库健康检查（异步）"""
         try:
-            session = self.create_session()
-            try:
-                from sqlalchemy import text
-                session.execute(text("SELECT 1"))
+            async with self.SessionLocal() as session:
+                await session.execute(text("SELECT 1"))
                 return True
-            finally:
-                session.close()
         except Exception as e:
             logger.error(f"数据库健康检查失败: {e}")
             return False

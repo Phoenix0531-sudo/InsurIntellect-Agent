@@ -3,6 +3,12 @@ let currentChatId = null;
 let chatHistory = [];
 let isLoading = false;
 let currentView = 'chat';
+// 流式控制
+let activeEventSource = null; // 兼容旧逻辑（EventSource）
+let activeStreamAbortController = null; // 新逻辑（POST + fetch 流式）
+let streamingInProgress = false;
+let streamRetryCount = 0;
+const MAX_STREAM_RETRIES = 1;
 
 // DOM 元素
 const chatMessages = document.getElementById('chatMessages');
@@ -84,6 +90,8 @@ document.addEventListener('DOMContentLoaded', function() {
         testAllFunctions();
         testResponsiveDesign();
     }, 1000);
+    // 绑定流式开关
+    bindStreamingToggle();
 });
 
 // 初始化应用
@@ -92,6 +100,15 @@ function initializeApp() {
     
     // 初始化主题
     initializeTheme();
+    // 默认启用流式展示（用户可后续通过UI或localStorage控制）
+    if (localStorage.getItem('useStreaming') === null) {
+        localStorage.setItem('useStreaming', 'true');
+    }
+    // 根据状态设置开关初始值
+    const toggle = document.getElementById('enableStreaming');
+    if (toggle) {
+        toggle.checked = isStreamingEnabled();
+    }
     
     // 设置默认视图
     switchView('chat');
@@ -225,33 +242,67 @@ function hideWelcomeSection() {
     }
 }
 
-// 发送消息
+// 发送消息（支持流式/非流式）
 async function sendMessage() {
     const message = chatInput.value.trim();
     if (!message || isLoading) return;
-    
+
     // 隐藏欢迎区域
     hideWelcomeSection();
-    
+
     // 添加用户消息
     addMessage(message, 'user');
-    
+
     // 清空输入框
     chatInput.value = '';
     updateCharCounter();
     updateSendButton();
     adjustTextareaHeight(chatInput);
-    
-    // 显示加载状态
+
+    // 根据开关选择流式或非流式
+    if (isStreamingEnabled()) {
+        startStreamingWithFetch(message);
+    } else {
+        sendMessageFetch(message);
+    }
+}
+
+// 判断是否启用流式展示
+function isStreamingEnabled() {
+    const checkbox = document.getElementById('enableStreaming');
+    if (checkbox) return !!checkbox.checked;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('stream') === '1' || url.searchParams.get('streaming') === 'true') return true;
+    const persisted = localStorage.getItem('useStreaming');
+    return persisted === 'true';
+}
+
+// 绑定开关并联动状态
+function bindStreamingToggle() {
+    const toggle = document.getElementById('enableStreaming');
+    const status = document.getElementById('streamStatus');
+    const cancelBtn = document.getElementById('cancelStreamBtn');
+    if (toggle) {
+        toggle.addEventListener('change', () => {
+            const enabled = !!toggle.checked;
+            localStorage.setItem('useStreaming', enabled ? 'true' : 'false');
+        });
+    }
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => cancelStreaming());
+    }
+    if (status) {
+        status.style.display = 'none';
+    }
+}
+
+// 非流式请求（原有 POST 逻辑）
+async function sendMessageFetch(message) {
     setLoading(true);
-    
     try {
-        // 发送请求到后端
         const response = await fetch('/api/v1/queries/ask', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 question: message,
                 query_type: 'general',
@@ -259,25 +310,412 @@ async function sendMessage() {
                 show_sources: document.getElementById('enableSources')?.checked || false
             })
         });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        
-        // 添加AI回复
         addMessage(data.answer, 'assistant', data.sources);
-        
-        // 保存到历史记录
         saveChatToHistory(message, data.answer);
-        
     } catch (error) {
         console.error('发送消息失败:', error);
         addMessage('抱歉，发生了错误。请稍后重试。', 'assistant', null, true);
     } finally {
         setLoading(false);
     }
+}
+
+// 流式请求：使用原生 EventSource 连接 GET /queries/ask/stream
+function startStreamingWithEventSource(message) {
+    setLoading(true);
+    streamingInProgress = true;
+    streamRetryCount = 0;
+    const status = document.getElementById('streamStatus');
+    if (status) status.style.display = 'inline';
+
+    // 创建一个占位的助手消息，后续逐字填充
+    const streamMsg = document.createElement('div');
+    streamMsg.className = 'message assistant';
+    const content = document.createElement('div');
+    content.className = 'message-content';
+    content.innerHTML = `
+        <div class="message-avatar"><i class="fas fa-robot"></i></div>
+        <div class="message-text" id="streamingText"></div>
+        <div class="streaming-meta" id="streamingMeta">
+            <div class="streaming-status"><i class="fas fa-spinner fa-spin"></i> 正在生成...</div>
+        </div>
+    `;
+    streamMsg.appendChild(content);
+    chatMessages.appendChild(streamMsg);
+    scrollToBottom();
+
+    const textEl = content.querySelector('#streamingText');
+    const metaEl = content.querySelector('#streamingMeta');
+    let bufferText = '';
+    let aborted = false;
+    let sseUrl;
+
+    // 组装 SSE URL
+    const params = new URLSearchParams({
+        question: message,
+        query_type: 'general'
+    });
+    sseUrl = `/api/v1/queries/ask/stream?${params.toString()}`;
+
+    let es;
+    const attachHandlers = (source) => {
+        source.onopen = () => {
+            // 连接成功
+        };
+        source.onmessage = (ev) => {
+            // 未指定事件类型的消息
+            try {
+                const payload = JSON.parse(ev.data);
+                if (payload && payload.text) {
+                    bufferText += payload.text;
+                    textEl.textContent = bufferText;
+                    scrollToBottom();
+                }
+            } catch (_) {}
+        };
+
+        source.addEventListener('start', (ev) => {
+            // 可在此设置初始占位或清空状态
+        });
+        source.addEventListener('context', (ev) => {
+            try {
+                const payload = JSON.parse(ev.data);
+                const chunks = Array.isArray(payload.retrieved_chunks) ? payload.retrieved_chunks : [];
+                if (chunks.length > 0) {
+                    const sources = chunks.slice(0, 5).map((c, idx) => {
+                        const name = c.document_name || `文档#${c.document_id}`;
+                        const page = (c.page_number !== null && c.page_number !== undefined) ? `第${c.page_number}页` : '';
+                        const score = (typeof c.similarity_score === 'number') ? `（相似度 ${c.similarity_score.toFixed(2)}）` : '';
+                        return `${name}${page ? ' ' + page : ''} ${score}`.trim();
+                    });
+                    const ctxHtml = createSourcesSection(sources);
+                    const box = document.createElement('div');
+                    box.innerHTML = ctxHtml;
+                    metaEl.appendChild(box);
+                }
+            } catch (err) {
+                console.error('解析 context 事件失败:', err);
+            }
+        });
+        source.addEventListener('token', (ev) => {
+            try {
+                const payload = JSON.parse(ev.data);
+                const token = payload.text || payload.token || payload.content || '';
+                if (token) {
+                    bufferText += token;
+                    textEl.textContent = bufferText;
+                    scrollToBottom();
+                }
+            } catch (err) {
+                console.error('解析 token 事件失败:', err);
+            }
+        });
+        source.addEventListener('end', (ev) => {
+            try {
+                const payload = JSON.parse(ev.data);
+                const finalHtml = formatAssistantMessage(bufferText);
+                textEl.innerHTML = finalHtml;
+                saveChatToHistory(message, bufferText);
+            } catch (err) {
+                console.error('解析 end 事件失败:', err);
+            } finally {
+                cleanupStream(source);
+                streamingInProgress = false;
+                const status = document.getElementById('streamStatus');
+                if (status) status.style.display = 'none';
+                setLoading(false);
+            }
+        });
+        source.addEventListener('error', (ev) => {
+            let msg = '抱歉，流式响应发生错误。';
+            try {
+                const payload = JSON.parse(ev.data);
+                if (payload && (payload.message || payload.error)) msg = `抱歉，发生错误：${payload.message || payload.error}`;
+            } catch (_) {}
+            textEl.textContent = msg;
+            cleanupStream(source);
+            streamingInProgress = false;
+            const status = document.getElementById('streamStatus');
+            if (status) status.style.display = 'none';
+            setLoading(false);
+        });
+
+        source.onerror = (e) => {
+            console.error('EventSource 连接错误:', e);
+            if (aborted) {
+                cleanupStream(source);
+                streamingInProgress = false;
+                const status = document.getElementById('streamStatus');
+                if (status) status.style.display = 'none';
+                setLoading(false);
+                return;
+            }
+            if (!bufferText && streamRetryCount < MAX_STREAM_RETRIES) {
+                streamRetryCount += 1;
+                console.warn('尝试断线重连...');
+                cleanupStream(source);
+                try {
+                    const newEs = new EventSource(sseUrl);
+                    activeEventSource = newEs;
+                    attachHandlers(newEs);
+                } catch (err) {
+                    console.error('重连失败，回退到非流式:', err);
+                    sendMessageFetch(message);
+                    streamingInProgress = false;
+                    const status = document.getElementById('streamStatus');
+                    if (status) status.style.display = 'none';
+                    setLoading(false);
+                }
+                return;
+            }
+            cleanupStream(source);
+            streamingInProgress = false;
+            const status = document.getElementById('streamStatus');
+            if (status) status.style.display = 'none';
+            setLoading(false);
+        };
+    };
+
+    try {
+        es = new EventSource(sseUrl);
+        activeEventSource = es;
+        attachHandlers(es);
+    } catch (e) {
+        console.error('创建 EventSource 失败，回退到非流式:', e);
+        sendMessageFetch(message);
+        streamingInProgress = false;
+        if (status) status.style.display = 'none';
+        return;
+    }
+
+    // 连接打开
+    es.onopen = () => {
+        // 已连接，等待事件
+    };
+
+    // 未命名事件（如果服务端发送了默认message）
+    es.onmessage = (ev) => {
+        // 兼容处理，但我们的服务端使用命名事件
+        try {
+            const payload = JSON.parse(ev.data);
+            const token = payload.content || payload.token || payload.text;
+            if (token) {
+                bufferText += token;
+                textEl.textContent = bufferText;
+                scrollToBottom();
+            }
+        } catch (_) {}
+    };
+
+    // 命名事件：start
+    es.addEventListener('start', (ev) => {
+        try {
+            const payload = JSON.parse(ev.data);
+            // 可根据 payload 初始化显示
+        } catch (_) {}
+    });
+
+    // 命名事件：context（可选显示检索信息）
+    // 事件绑定由 attachHandlers 完成
+
+    // 命名事件：token（逐字追加）
+    es.addEventListener('token', (ev) => {
+        try {
+            const payload = JSON.parse(ev.data);
+            const token = (typeof payload.content === 'string') ? payload.content : payload.token || payload.text;
+            if (token) {
+                bufferText += token;
+                textEl.textContent = bufferText;
+                scrollToBottom();
+            }
+        } catch (err) {
+            console.error('解析 token 事件失败:', err);
+        }
+    });
+
+    // 命名事件：end（完成）
+    // 事件绑定由 attachHandlers 完成
+
+    // 命名事件：error（服务端错误）
+    // 事件绑定由 attachHandlers 完成
+
+    // 客户端错误（网络/连接）
+    // 事件绑定由 attachHandlers 完成
+}
+
+// 流式请求（统一到 POST /queries/ask?stream=1）：使用 fetch 读取 SSE
+async function startStreamingWithFetch(message) {
+    setLoading(true);
+    streamingInProgress = true;
+    const status = document.getElementById('streamStatus');
+    if (status) status.style.display = 'inline';
+
+    // 创建一个占位的助手消息，后续逐字填充
+    const streamMsg = document.createElement('div');
+    streamMsg.className = 'message assistant';
+    const content = document.createElement('div');
+    content.className = 'message-content';
+    content.innerHTML = `
+        <div class="message-avatar"><i class="fas fa-robot"></i></div>
+        <div class="message-text" id="streamingText"></div>
+        <div class="streaming-meta" id="streamingMeta">
+            <div class="streaming-status"><i class="fas fa-spinner fa-spin"></i> 正在生成...</div>
+        </div>
+    `;
+    streamMsg.appendChild(content);
+    chatMessages.appendChild(streamMsg);
+    scrollToBottom();
+
+    const textEl = content.querySelector('#streamingText');
+    const metaEl = content.querySelector('#streamingMeta');
+    let bufferText = '';
+
+    const controller = new AbortController();
+    activeStreamAbortController = controller;
+
+    try {
+        const response = await fetch('/api/v1/queries/ask?stream=1', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: message,
+                query_type: 'general',
+                stream: true
+            }),
+            signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        // 读取 SSE 数据帧
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buf = '';
+        let eventType = 'message';
+        let eventDataLines = [];
+
+        const dispatchEvent = (type, dataStr) => {
+            try {
+                const payload = JSON.parse(dataStr);
+                if (type === 'start') {
+                    // 可根据 payload 初始化显示
+                } else if (type === 'context') {
+                    const chunks = Array.isArray(payload.retrieved_chunks) ? payload.retrieved_chunks : [];
+                    if (chunks.length > 0) {
+                        const sources = chunks.slice(0, 5).map((c, idx) => {
+                            const name = c.document_name || `文档#${c.document_id}`;
+                            const page = (c.page_number !== null && c.page_number !== undefined) ? `第${c.page_number}页` : '';
+                            const score = (typeof c.similarity_score === 'number') ? `（相似度 ${c.similarity_score.toFixed(2)}）` : '';
+                            return `${name}${page ? ' ' + page : ''} ${score}`.trim();
+                        });
+                        const ctxHtml = createSourcesSection(sources);
+                        const box = document.createElement('div');
+                        box.innerHTML = ctxHtml;
+                        metaEl.appendChild(box);
+                    }
+                } else if (type === 'token') {
+                    const token = payload.text || payload.token || payload.content || '';
+                    if (token) {
+                        bufferText += token;
+                        textEl.textContent = bufferText;
+                        scrollToBottom();
+                    }
+                } else if (type === 'end') {
+                    const finalHtml = formatAssistantMessage(bufferText);
+                    textEl.innerHTML = finalHtml;
+                    saveChatToHistory(message, bufferText);
+                    cleanupStream();
+                    streamingInProgress = false;
+                    if (status) status.style.display = 'none';
+                    setLoading(false);
+                } else if (type === 'error') {
+                    let msg = '抱歉，流式响应发生错误。';
+                    if (payload && (payload.message || payload.error)) msg = `抱歉，发生错误：${payload.message || payload.error}`;
+                    textEl.textContent = msg;
+                    cleanupStream();
+                    streamingInProgress = false;
+                    if (status) status.style.display = 'none';
+                    setLoading(false);
+                } else {
+                    // 默认消息：忽略或追加 text 字段
+                    if (payload && payload.text) {
+                        bufferText += payload.text;
+                        textEl.textContent = bufferText;
+                        scrollToBottom();
+                    }
+                }
+            } catch (err) {
+                // 忽略单帧解析错误
+            }
+        };
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+
+            // 逐行解析，依据空行分隔事件
+            const lines = buf.split(/\r?\n/);
+            // 保留最后一行（可能是不完整行）
+            buf = lines.pop();
+
+            for (const line of lines) {
+                if (line.startsWith('event:')) {
+                    eventType = line.slice(6).trim();
+                } else if (line.startsWith('data:')) {
+                    eventDataLines.push(line.slice(5).trim());
+                } else if (line === '') {
+                    // 空行：触发事件
+                    const dataStr = eventDataLines.join('\n');
+                    if (eventType && dataStr) {
+                        dispatchEvent(eventType, dataStr);
+                    }
+                    // 重置
+                    eventType = 'message';
+                    eventDataLines = [];
+                }
+            }
+        }
+
+        // 处理缓冲尾巴：若有未触发的事件
+        if (eventDataLines.length > 0) {
+            const dataStr = eventDataLines.join('\n');
+            dispatchEvent(eventType, dataStr);
+        }
+
+    } catch (error) {
+        console.error('流式发送失败:', error);
+        addMessage('抱歉，发生了错误。请稍后重试。', 'assistant', null, true);
+    } finally {
+        streamingInProgress = false;
+        if (status) status.style.display = 'none';
+        setLoading(false);
+    }
+}
+
+function cleanupStream(es) {
+    try { es && es.close && es.close(); } catch (_) {}
+    activeEventSource = null;
+    if (activeStreamAbortController) {
+        try { activeStreamAbortController.abort(); } catch (_) {}
+        activeStreamAbortController = null;
+    }
+}
+
+// 取消流式生成
+function cancelStreaming() {
+    if (activeEventSource) {
+        try { activeEventSource.close(); } catch (_) {}
+    }
+    if (activeStreamAbortController) {
+        try { activeStreamAbortController.abort(); } catch (_) {}
+        activeStreamAbortController = null;
+    }
+    streamingInProgress = false;
+    const status = document.getElementById('streamStatus');
+    if (status) status.style.display = 'none';
+    setLoading(false);
 }
 
 // 发送预设提示

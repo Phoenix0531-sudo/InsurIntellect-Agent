@@ -5,7 +5,9 @@
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from starlette.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, delete
 
 from app.core.database import get_db
 from app.core.app_logging import get_logger
@@ -27,11 +29,12 @@ async def test_endpoint():
     return {"message": "测试成功", "status": "ok"}
 
 
-@router.post("/ask", response_model=QueryResponse, summary="提交问题查询")
+@router.post("/ask", summary="提交问题查询（统一：支持非流与SSE流）")
 async def ask_question(
     query_request: QueryRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    stream: Optional[bool] = None,
 ):
     """
     提交问题并获取基于文档的回答
@@ -49,13 +52,22 @@ async def ask_question(
         if len(query_request.question) > 1000:
             raise HTTPException(status_code=400, detail="问题长度不能超过1000个字符")
 
-        # 处理查询
         query_service = QueryService()
-        response = await query_service.process_query(
-            db=db,
-            request=query_request
-        )
 
+        # 统一：优先使用请求体中的 stream 字段；若为空回退 querystring
+        use_stream = (
+            query_request.stream if hasattr(query_request, "stream") else None
+        )
+        if use_stream is None:
+            use_stream = bool(stream)
+
+        if use_stream:
+            sse_iter = await query_service.process_query(db=db, request=query_request, stream=True)
+            logger.info(f"查询流式处理开始: {query_request.question[:50]}...")
+            return StreamingResponse(sse_iter, media_type="text/event-stream")
+
+        # 非流式统一入口
+        response = await query_service.process_query(db=db, request=query_request, stream=False)
         logger.info(f"查询处理完成: {query_request.question[:50]}...")
         return response
 
@@ -66,6 +78,9 @@ async def ask_question(
         raise HTTPException(status_code=500, detail=f"查询处理失败: {str(e)}")
 
 
+# 说明：已统一到 POST /ask + body.stream=true，移除旧版 GET /ask/stream 兼容层
+
+
 @router.get("/history", response_model=List[QueryHistoryResponse], summary="获取查询历史")
 async def get_query_history(
     skip: int = 0,
@@ -73,7 +88,7 @@ async def get_query_history(
     query_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     获取查询历史记录
@@ -150,10 +165,11 @@ async def get_query_history(
 
 
 @router.get("/history/{query_id}", response_model=QueryHistoryResponse, summary="获取查询详情")
-async def get_query_detail(query_id: int, db: Session = Depends(get_db)):
+async def get_query_detail(query_id: int, db: AsyncSession = Depends(get_db)):
     """获取指定查询的详细信息"""
     try:
-        query_record = db.query(QueryHistory).filter(QueryHistory.id == query_id).first()
+        result = await db.execute(select(QueryHistory).where(QueryHistory.id == query_id))
+        query_record = result.scalar_one_or_none()
         if not query_record:
             raise HTTPException(status_code=404, detail="查询记录不存在")
 
@@ -213,7 +229,7 @@ async def get_query_detail(query_id: int, db: Session = Depends(get_db)):
 async def submit_feedback(
     query_id: int,
     feedback: FeedbackRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """为查询结果提交反馈"""
     try:
@@ -240,7 +256,7 @@ async def submit_feedback(
 @router.get("/statistics", response_model=QueryStatistics, summary="获取查询统计信息")
 async def get_query_statistics(
     days: int = 30,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     获取查询统计信息
@@ -260,7 +276,7 @@ async def batch_query(
     questions: List[str],
     request: Request,
     query_type: str = "general",
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     批量处理多个查询
@@ -318,7 +334,7 @@ async def batch_query(
 async def get_query_suggestions(
     partial_query: str,
     limit: int = 5,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     基于历史查询获取查询建议
@@ -328,11 +344,14 @@ async def get_query_suggestions(
             return []
 
         # 从历史查询中搜索相似问题
-        similar_queries = db.query(QueryHistory.query).filter(
-            QueryHistory.query.contains(partial_query.strip())
-        ).distinct().limit(limit).all()
-
-        suggestions = [query[0] for query in similar_queries]
+        stmt = (
+            select(QueryHistory.query)
+            .where(QueryHistory.query.contains(partial_query.strip()))
+            .distinct()
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        suggestions = [row[0] for row in result.all()]
 
         # 如果历史查询不足,可以添加一些预定义的建议
         if len(suggestions) < limit:
@@ -358,15 +377,16 @@ async def get_query_suggestions(
 
 
 @router.delete("/history/{query_id}", summary="删除查询记录")
-async def delete_query_history(query_id: int, db: Session = Depends(get_db)):
+async def delete_query_history(query_id: int, db: AsyncSession = Depends(get_db)):
     """删除指定的查询历史记录"""
     try:
-        query_record = db.query(QueryHistory).filter(QueryHistory.id == query_id).first()
+        result = await db.execute(select(QueryHistory).where(QueryHistory.id == query_id))
+        query_record = result.scalar_one_or_none()
         if not query_record:
             raise HTTPException(status_code=404, detail="查询记录不存在")
 
         db.delete(query_record)
-        db.commit()
+        await db.commit()
 
         logger.info(f"查询记录删除成功: {query_id}")
         return {"message": "查询记录删除成功", "query_id": query_id}
@@ -382,7 +402,7 @@ async def delete_query_history(query_id: int, db: Session = Depends(get_db)):
 async def clear_query_history(
     confirm: bool = False,
     days: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     清空查询历史记录
@@ -393,18 +413,21 @@ async def clear_query_history(
         if not confirm:
             raise HTTPException(status_code=400, detail="请确认清空操作")
 
-        query = db.query(QueryHistory)
-
+        # 计算删除数量并执行删除
         if days:
             cutoff_date = datetime.utcnow() - timedelta(days=days)
-            query = query.filter(QueryHistory.created_time < cutoff_date)
-            deleted_count = query.count()
-            query.delete()
+            count_stmt = select(func.count()).select_from(QueryHistory).where(
+                QueryHistory.created_time < cutoff_date
+            )
+            deleted_count = (await db.execute(count_stmt)).scalar() or 0
+            delete_stmt = delete(QueryHistory).where(QueryHistory.created_time < cutoff_date)
         else:
-            deleted_count = query.count()
-            query.delete()
+            count_stmt = select(func.count()).select_from(QueryHistory)
+            deleted_count = (await db.execute(count_stmt)).scalar() or 0
+            delete_stmt = delete(QueryHistory)
 
-        db.commit()
+        await db.execute(delete_stmt)
+        await db.commit()
         logger.info(f"查询历史清空完成: 删除了{deleted_count}条记录")
 
         return {

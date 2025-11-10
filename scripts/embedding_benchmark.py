@@ -33,6 +33,10 @@ from typing import List, Dict, Any, Tuple
 from app.core.config import settings
 from app.core.app_logging import setup_logging, get_logger
 from app.core.chromadb_manager import chroma_manager
+try:
+    from sentence_transformers import SentenceTransformer
+except Exception:
+    SentenceTransformer = None  # 运行时可选依赖，用于本地微调模型评测
 
 
 # ----------------------------
@@ -89,6 +93,23 @@ class GteQwen15_7BInstructStub(EmbeddingModelInterface):
 class Ada002Stub(EmbeddingModelInterface):
     def __init__(self, global_seed: int = 42):
         super().__init__(name="text-embedding-ada-002", dim=1536, global_seed=global_seed)
+
+
+class SentenceTransformersModel(EmbeddingModelInterface):
+    """基于 sentence-transformers 的真实嵌入模型包装，用于评测本地或HF模型。"""
+
+    def __init__(self, model_id_or_path: str, global_seed: int = 42):
+        if SentenceTransformer is None:
+            raise RuntimeError("sentence-transformers 未安装，无法加载真实模型")
+        self._st_model = SentenceTransformer(model_id_or_path)
+        dim = int(self._st_model.get_sentence_embedding_dimension())
+        super().__init__(name=model_id_or_path, dim=dim, global_seed=global_seed)
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return self._st_model.encode(texts or [""], normalize_embeddings=True, batch_size=64)
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._st_model.encode([text or ""], normalize_embeddings=True)[0]
 
 
 # ----------------------------
@@ -261,6 +282,19 @@ def main():
         Ada002Stub(global_seed=global_seed),
     ]
 
+    # 加入真实模型：基础模型与本地微调模型（若存在）
+    if SentenceTransformer is not None:
+        try:
+            models.append(SentenceTransformersModel("BAAI/bge-large-zh-v1.5", global_seed=global_seed))
+        except Exception:
+            pass
+        local_model_dir = Path("models/finetuned_embedding_v1")
+        if local_model_dir.exists():
+            try:
+                models.append(SentenceTransformersModel(str(local_model_dir), global_seed=global_seed))
+            except Exception:
+                pass
+
     # 获取 Chroma 持久客户端
     client = chroma_manager.get_client()
 
@@ -268,7 +302,10 @@ def main():
     model_results: List[Dict[str, Any]] = []
 
     for m in models:
-        collection_name = f"benchmark_{m.name.replace('/', '_').replace('-', '_').replace('.', '_')}"
+        safe_name = (
+            m.name.replace('/', '_').replace('\\', '_').replace('-', '_').replace('.', '_')
+        )
+        collection_name = f"benchmark_{safe_name}"
         logger.info(f"准备模型集合: {collection_name} (dim={m.dim})")
         collection = ensure_fresh_collection(client, collection_name)
         add_corpus_to_collection(collection, m, corpus)
