@@ -7,13 +7,13 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, and_
 
 from app.core.database import get_db
 from app.core.app_logging import get_logger
 from app.models.database_models import QueryHistory
 from app.models.schemas import (
-    QueryRequest, QueryResponse, QueryHistoryResponse,
+    QueryRequest, QueryResponse, QueryHistoryResponse, QueryHistoryListResponse,
     FeedbackRequest, QueryStatistics, ErrorResponse
 )
 from app.services.query_service import QueryService
@@ -81,13 +81,15 @@ async def ask_question(
 # 说明：已统一到 POST /ask + body.stream=true，移除旧版 GET /ask/stream 兼容层
 
 
-@router.get("/history", response_model=List[QueryHistoryResponse], summary="获取查询历史")
+@router.get("/history", response_model=QueryHistoryListResponse, summary="获取查询历史")
 async def get_query_history(
     skip: int = 0,
-    limit: int = 50,
+    # 将默认 limit 提高，避免在历史较多时被 50 条截断导致外部统计误判
+    limit: int = 1000,
     query_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    count_only: bool = False,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -157,7 +159,25 @@ async def get_query_history(
                 )
             )
 
-        return results
+        # 计算总数（与筛选条件一致）
+        conditions = []
+        if query_type:
+            conditions.append(QueryHistory.model_used == query_type)
+        if start_date:
+            conditions.append(QueryHistory.created_time >= start_date)
+        if end_date:
+            conditions.append(QueryHistory.created_time <= end_date)
+
+        count_query = select(func.count()).select_from(QueryHistory)
+        if conditions:
+            count_query = count_query.where(and_(*conditions))
+        total_count = (await db.execute(count_query)).scalar_one()
+
+        if count_only:
+            # 仅返回总数，避免大列表传输开销
+            return QueryHistoryListResponse(items=[], total_count=total_count)
+
+        return QueryHistoryListResponse(items=results, total_count=total_count)
 
     except Exception as e:
         logger.error(f"获取查询历史失败: {e}")

@@ -1,11 +1,11 @@
 """
 服务层包
-包含业务逻辑和外部服务集成"""
+包含业务逻辑和外部服务集成
 
-from .query_service import QueryService
-# from .document_service import DocumentService  # 文档管理功能已移除
-from .llm_service import LLMService
+注意：避免在包导入阶段引入跨模块重依赖，防止循环导入。
+按需在使用处直接从具体模块导入（例如：from app.services.query_service import QueryService）。
+"""
 
-__all__ = ["QueryService", "LLMService"]  # "DocumentService" 已移除
+__all__ = []
 
 

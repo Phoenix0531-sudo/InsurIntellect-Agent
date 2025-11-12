@@ -4,11 +4,12 @@ Web 与 API 端到端冒烟测试
 验证前端页面与主要 API 端点可用性
 """
 
+import os
 import requests
 from app.core.app_logging import setup_logging, get_logger
 
-
-BASE_URL = "http://localhost:8001"
+# 支持环境变量配置，默认使用本地 8000
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 
 # 初始化日志
 logger = setup_logging()

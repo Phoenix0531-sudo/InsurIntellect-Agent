@@ -82,7 +82,7 @@ def check_embedding_model_info() -> bool:
 def main():
     """主函数。"""
 
-    setup_logging(level="INFO")
+    setup_logging(log_level="INFO")
     logger.info("=" * 60)
     logger.info("ChromaDB 元数据检查")
     logger.info("=" * 60)

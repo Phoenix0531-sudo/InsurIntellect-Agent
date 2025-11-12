@@ -144,6 +144,63 @@ function setupEventListeners() {
     });
     
     // 文件拖拽功能已移除
+
+    // 统一事件绑定：按钮与快捷提示（移除内联事件后）
+    const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+    if (toggleSidebarBtn) {
+        toggleSidebarBtn.addEventListener('click', () => {
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) sidebar.classList.toggle('collapsed');
+        });
+    }
+
+    const startNewChatBtn = document.getElementById('startNewChatBtn');
+    if (startNewChatBtn) {
+        startNewChatBtn.addEventListener('click', startNewChat);
+    }
+
+    const clearChatHistoryBtn = document.getElementById('clearChatHistoryBtn');
+    if (clearChatHistoryBtn) {
+        clearChatHistoryBtn.addEventListener('click', clearChatHistory);
+    }
+
+    const exportChatBtn = document.getElementById('exportChatBtn');
+    if (exportChatBtn) {
+        exportChatBtn.addEventListener('click', exportChat);
+    }
+
+    const exportChatTopBtn = document.getElementById('exportChatTopBtn');
+    if (exportChatTopBtn) {
+        exportChatTopBtn.addEventListener('click', exportChat);
+    }
+
+    const shareChatBtn = document.getElementById('shareChatBtn');
+    if (shareChatBtn) {
+        shareChatBtn.addEventListener('click', shareChat);
+    }
+
+    const settingsBtn = document.getElementById('settingsBtn');
+    if (settingsBtn) {
+        settingsBtn.addEventListener('click', openSettings);
+    }
+
+    const themeToggleBtn = document.getElementById('themeToggleBtn');
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', toggleTheme);
+    }
+
+    const cancelStreamBtn = document.getElementById('cancelStreamBtn');
+    if (cancelStreamBtn) {
+        cancelStreamBtn.addEventListener('click', cancelStreaming);
+    }
+
+    // 建议提示按钮绑定（使用 data-prompt）
+    document.querySelectorAll('.btn-professional[data-prompt]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const prompt = btn.getAttribute('data-prompt');
+            if (prompt) sendPrompt(prompt);
+        });
+    });
 }
 
 // 处理键盘事件
@@ -1089,6 +1146,11 @@ function refreshHistory() {
 // 导出功能
 function exportChat() {
     showToast('导出功能开发中...');
+}
+
+// 分享功能占位
+function shareChat() {
+    showToast('分享功能开发中...');
 }
 
 // 分析功能

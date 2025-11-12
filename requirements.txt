@@ -22,7 +22,9 @@ pypdf==5.9.0
 PyPDF2==3.0.1
 pdfplumber==0.11.5
 python-multipart==0.0.20
-PyMuPDF==1.24.10
+# 注意：PyMuPDF 在 Windows + Python 3.13 上可能无轮子
+# 如需 PDF 解析，请在 Python<3.13 环境使用下行依赖；否则跳过
+# pymupdf>=1.24,<1.25 ; python_version < "3.13"
 pytesseract==0.3.10
 Pillow==10.3.0
 unstructured==0.18.18

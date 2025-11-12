@@ -158,6 +158,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ### 查询问答（/api/v1/queries）
 
 - `POST /api/v1/queries/ask` - 提交问题查询
+- `GET /api/v1/queries/history` - 获取查询历史（支持分页与计数）
 - `GET /api/v1/queries/history/{id}` - 获取查询详情
 - `POST /api/v1/queries/history/{id}/feedback` - 提交反馈
 - `GET /api/v1/queries/statistics` - 查询统计
@@ -187,7 +188,58 @@ curl -X POST "http://127.0.0.1:8000/api/v1/queries/ask" \
 #### 返回字段说明（更新）
 - `/api/v1/queries/ask` 响应包含：`query_id`、`question`、`answer`、`query_type`、`response_time`、`chunks_used`、`retrieved_chunks`、`confidence_score` 等。
   - 当模型/API Key 缺失或上游失败时，仍会返回非空的 `query_id`，`answer` 为友好错误提示，`retrieved_chunks` 为空列表。
-- `/api/v1/queries/history` 响应项的 `metadata` 中包含：`rewritten_query`（查询改写结果）、`rewriting_metadata`（改写过程元数据）、`retrieved_chunks`（检索片段及相似度）。
+- `/api/v1/queries/history` 返回 `QueryHistoryListResponse` 对象：
+  - `items`：`QueryHistoryResponse[]` 列表，每项包含 `id`、`question`、`answer`、`query_type`、`response_time`、`chunks_used`、`similarity_scores`、`created_at`、`metadata`。
+  - `total_count`：满足筛选条件的历史记录总数（与分页无关）。
+  - 每个 `items` 项的 `metadata` 中包含：`rewritten_query`（查询改写结果）、`rewriting_metadata`（改写过程元数据）、`retrieved_chunks`（检索片段及相似度与审计信息）。
+
+示例：
+```json
+{
+  "items": [
+    {
+      "id": 123,
+      "question": "这份保险的保障范围是什么？",
+      "answer": "生成的回答或友好错误提示",
+      "query_type": "general",
+      "response_time": 7.42,
+      "chunks_used": 5,
+      "similarity_scores": [0.81, 0.77, 0.74],
+      "created_at": "2025-11-12T16:20:00Z",
+      "metadata": {
+        "rewritten_query": "该问题的优化改写",
+        "rewriting_metadata": {"primary_search_intent": "保障范围", "query_vectors": [/*...*/]},
+        "retrieved_chunks": [
+          {
+            "chunk_id": "...",
+            "document_id": "...",
+            "document_name": "...",
+            "content": "...",
+            "page_number": 2,
+            "similarity_score": 0.83,
+            "metadata": {
+              "ranking_details": {"final_score": 0.86},
+              "effective_date": "2024-10-01"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "total_count": 66
+}
+```
+
+计数专用用法：
+```bash
+curl -X GET "http://127.0.0.1:8000/api/v1/queries/history?count_only=true"
+# 返回：{"items":[],"total_count":<满足筛选条件的总数>}
+```
+
+分页与筛选示例：
+```bash
+curl -X GET "http://127.0.0.1:8000/api/v1/queries/history?skip=0&limit=50&query_type=general"
+```
 
 #### 响应模型详解（ask 示例）
 ```json
@@ -234,8 +286,11 @@ curl -X POST "http://127.0.0.1:8000/api/v1/queries/ask" \
   -H "Content-Type: application/json; charset=utf-8" \
   -d '{"question":"测试：没有API密钥时也应返回 query_id","query_type":"general"}'
 
-# 2) 查看历史（count 增加，最近一项 metadata.* 可能为空）
+# 2) 查看历史列表（items 列表与 total_count 统计）
 curl -X GET "http://127.0.0.1:8000/api/v1/queries/history"
+
+# 3) 仅获取历史总数（不返回 items）
+curl -X GET "http://127.0.0.1:8000/api/v1/queries/history?count_only=true"
 ```
 
 或使用测试脚本：
@@ -267,6 +322,17 @@ curl.exe -X POST "http://127.0.0.1:8000/api/v1/queries/ask/stream" \
   }'
 ```
 提示：请避免使用会截断 SSE 的管道/分页；若仅调试检索，可关注 `context` 事件中的 `retrieved_chunks`。
+
+### 兼容性与前端适配
+
+- 历史接口字段从早期预览版的 `Count` 统一为 `total_count`。请前端改用 `total_count`；如需兼容旧结构，可同时回退读取 `Count`。
+- 前端示例（兼容处理）：
+```js
+const res = await fetch('/api/v1/queries/history');
+const data = await res.json();
+const items = data.items ?? data.history ?? (Array.isArray(data) ? data : []);
+const total = data.total_count ?? data.Count ?? (Array.isArray(items) ? items.length : 0);
+```
 
 ### 多轮对话与 session_id 使用
 
@@ -931,3 +997,59 @@ MIT License
   - 汇总报告：`python scripts/report_backfill.py --report-dir reports`
 
 > 注：若在 CI 中运行，建议同时生成机器可读 JSON 与简要 Markdown，以便后续统计。同时可在测试脚本中加入网关就绪轮询与重试，以降低临时不可用对结果的影响。
+## 前端事件绑定与约定
+
+为避免重复触发与脚本逻辑冲突，前端事件统一在 `static/js/app.js` 中完成绑定，页面 HTML 不再使用内联事件（如 `onclick`、`oninput`、`onkeydown`）。核心约定如下：
+
+- 统一入口：在 `DOMContentLoaded` 中调用：
+  ```js
+  document.addEventListener('DOMContentLoaded', () => {
+    setupEventListeners();
+    initializeTheme();
+  });
+  ```
+- 文本输入框：
+  - 元素：`#chat-input`
+  - 自动高度：`adjustTextareaHeight()` 在 `input` 事件中绑定
+  - 回车发送：`handleKeyDown()` 处理（`Shift+Enter` 换行，`Enter` 发送）
+  - 计数显示：`updateCharCounter()`（如界面包含字符计数器）
+- 统一绑定的按钮与选择器（在 `setupEventListeners()` 中）：
+  - `#toggle-sidebar-btn`：展开/折叠侧栏
+  - `#new-chat-btn`：新建对话
+  - `#clear-history-btn`：清空历史
+  - `#export-chat-btn`：导出聊天记录
+  - `#share-chat-btn`：分享（预留占位函数 `shareChat()`）
+  - `#open-settings-btn`：打开设置
+  - `#toggle-theme-btn`：主题切换（深/浅色）
+  - `#cancel-stream-btn`：取消当前流式响应
+  - `#send-btn`：发送当前输入
+- 提示/示例按钮：使用 `data-prompt` 属性标注提示内容，示例：
+  ```html
+  <button class="prompt-chip" data-prompt="理赔需要哪些材料？">理赔材料清单</button>
+  ```
+  在脚本中统一绑定：
+  ```js
+  document.querySelectorAll('[data-prompt]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const prompt = btn.getAttribute('data-prompt') || '';
+      applyPromptSuggestion(prompt);
+    });
+  });
+  ```
+- 不再加载 `static/js/script.js`（其中包含另一套 UI 逻辑，可能与 `app.js` 重叠）；若确需从中保留函数，请将所需逻辑迁移到 `app.js` 并在 `setupEventListeners()` 中统一绑定。
+- 常见错误与修复：
+  - `ReferenceError: autoResizeTextarea is not defined`
+    - 原因：HTML 使用了 `oninput="autoResizeTextarea(this)"`，而页面仅加载了定义 `adjustTextareaHeight()` 的 `app.js`
+    - 解决：移除所有内联事件，由 `setupEventListeners()` 绑定 `input` 事件并调用 `adjustTextareaHeight()`
+
+简单验收步骤：
+- 启动服务并打开 `http://127.0.0.1:8000/`
+- 输入框随输入自动增高，无控制台错误
+- 侧栏按钮、主题切换、示例提示按钮均可正常工作
+
+---
+
+## 变更日志
+
+- 2025-11-12（docs/frontend）：统一前端事件绑定至 `static/js/app.js`，移除 HTML 内联事件；修复 `autoResizeTextarea` 引用错误；采用 `adjustTextareaHeight()` 处理文本域自适应。
+- 2025-11-12（docs/api）：`GET /api/v1/queries/history` 文档统一为 `QueryHistoryListResponse`（`items` + `total_count`）；新增 `count_only=true` 用法与示例；前端兼容旧字段 `Count` 的读取，建议优先使用 `total_count`。

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 InsurIntellect Agent - RAG Workflow Engine
 =========================================
@@ -179,27 +179,80 @@ class InsurIntellectAgent:
             # 调用LLM
             response = self.llm.invoke(prompt)
             
-            # 解析JSON响应
+            # 解析JSON响应（更稳健）：支持去除代码块、提取首尾花括号、宽松容错
             try:
-                # 尝试从响应中提取JSON部分
-                content = response.content.strip()
-                
-                # 如果响应包含代码块,提取其中的JSON
-                if "```json" in content:
-                    start = content.find("```json") + 7
-                    end = content.find("```", start)
-                    if end != -1:
-                        content = content[start:end].strip()
-                elif "```" in content:
-                    start = content.find("```") + 3
-                    end = content.find("```", start)
-                    if end != -1:
-                        content = content[start:end].strip()
-                
-                # 尝试解析JSON
-                result = json.loads(content)
-                logger.info(f"查询架构师完成工作,重写查询: {result.get('rewritten_query', '解析失败')}")
-                return result
+                content = (response.content or "").strip()
+
+                def _strip_code_fences(text: str) -> str:
+                    t = text.strip()
+                    if "```json" in t:
+                        s = t.find("```json") + 7
+                        e = t.find("```", s)
+                        if e != -1:
+                            return t[s:e].strip()
+                    if "```" in t:
+                        s = t.find("```") + 3
+                        e = t.find("```", s)
+                        if e != -1:
+                            return t[s:e].strip()
+                    return t
+
+                def _extract_json_object(text: str) -> str:
+                    # 尝试定位首个 '{' 与最后一个 '}' 并做括号配对
+                    import re
+                    t = _strip_code_fences(text)
+                    # 如果已经是纯 JSON 尝试直接解析
+                    try:
+                        json.loads(t)
+                        return t
+                    except Exception:
+                        pass
+                    # 正则粗略截取最外层对象
+                    first = t.find('{')
+                    last = t.rfind('}')
+                    if first != -1 and last != -1 and last > first:
+                        candidate = t[first:last+1]
+                        # 简单括号计数校验
+                        stack = 0
+                        for ch in candidate:
+                            if ch == '{':
+                                stack += 1
+                            elif ch == '}':
+                                stack -= 1
+                        if stack == 0:
+                            return candidate.strip()
+                    return t
+
+                raw = _extract_json_object(content)
+                parsed = json.loads(raw)
+
+                # 归一化与回退：保障下游使用 rewritten_query
+                normalized: Dict[str, Any] = dict(parsed)
+                # 提取独立查询作为 rewritten_query 的首选
+                rewritten = (
+                    parsed.get("independent_query")
+                    or parsed.get("rewritten_query")
+                    or parsed.get("original_query")
+                    or user_query
+                )
+                normalized["rewritten_query"] = rewritten
+
+                # 规范 query_vectors：允许字符串列表或对象列表
+                qv = parsed.get("query_vectors")
+                if isinstance(qv, list):
+                    fixed = []
+                    for item in qv:
+                        if isinstance(item, str):
+                            fixed.append({"title": "变体", "query": item})
+                        elif isinstance(item, dict):
+                            # 统一字段名
+                            q = item.get("query") or item.get("text") or ""
+                            t = item.get("title") or item.get("vector_type") or "变体"
+                            fixed.append({"title": t, "query": q})
+                    normalized["query_vectors"] = fixed
+
+                logger.info(f"查询架构师完成工作,重写查询: {normalized.get('rewritten_query', '解析失败')}")
+                return normalized
                 
             except json.JSONDecodeError as e:
                 logger.exception("查询架构师返回的不是合法JSON")

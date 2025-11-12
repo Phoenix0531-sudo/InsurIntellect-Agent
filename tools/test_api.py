@@ -221,10 +221,14 @@ def _get_history_count_and_items() -> tuple[int, list]:
             logger.error(f"❌ /queries/history 返回 {r.status_code}")
             return 0, []
         data = r.json()
-        # 兼容不同结构：可能是 {items:[...], Count:n} 或纯列表
+        # 兼容不同结构：优先 {items:[...], total_count:n}；兼容旧 {Count:n}；或纯列表
         if isinstance(data, dict):
             items = data.get("items") or data.get("history") or []
-            count = data.get("Count") or len(items)
+            count = data.get("total_count")
+            if count is None:
+                count = data.get("Count")
+            if count is None:
+                count = len(items)
             return int(count), items
         elif isinstance(data, list):
             return len(data), data

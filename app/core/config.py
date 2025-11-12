@@ -62,8 +62,8 @@ class Settings(BaseSettings):
     MAX_CHUNKS_PER_DOCUMENT: int = Field(default=1000, description="每个文档最大块数")
     
     # 查询配置
-    MAX_RETRIEVED_CHUNKS: int = Field(default=5, description="最大检索块数")
-    SIMILARITY_THRESHOLD: float = Field(default=0.7, description="相似度阈值")
+    MAX_RETRIEVED_CHUNKS: int = Field(default=8, description="最大检索块数")
+    SIMILARITY_THRESHOLD: float = Field(default=0.35, description="相似度阈值")
 
     # 查询重写配置（攻关任务二）
     ENABLE_QUERY_REWRITING: bool = Field(default=False, description="启用口语化查询意图转换引擎")
@@ -96,12 +96,12 @@ class Settings(BaseSettings):
     )
 
     # 攻关任务四：新排序规则（线性加权 + 阶跃时效 + ESG 加分 + 过期惩罚）
-    RERANK_ORIG_WEIGHT: float = Field(default=0.7, description="原始相似度权重 (W_orig)")
-    RERANK_BIZ_WEIGHT: float = Field(default=0.3, description="业务得分权重 (W_biz)")
-    RERANK_RECENCY_BOOST: float = Field(default=0.3, description="时效性阶跃加分（6个月内 +0.3）")
+    RERANK_ORIG_WEIGHT: float = Field(default=0.6, description="原始相似度权重 (W_orig)")
+    RERANK_BIZ_WEIGHT: float = Field(default=0.4, description="业务得分权重 (W_biz)")
+    RERANK_RECENCY_BOOST: float = Field(default=0.4, description="时效性阶跃加分（6个月内 +0.4）")
     RERANK_COMPLIANCE_KEYWORDS: List[str] = Field(default=["ESG"], description="文档内触发的合规关键字")
-    RERANK_COMPLIANCE_BOOST_SCORE: float = Field(default=0.1, description="ESG 加分幅度 (+0.1)")
-    RERANK_EXPIRED_PENALTY: float = Field(default=0.5, description="过期文档固定惩罚因子 (×0.5)")
+    RERANK_COMPLIANCE_BOOST_SCORE: float = Field(default=0.15, description="ESG 加分幅度 (+0.15)")
+    RERANK_EXPIRED_PENALTY: float = Field(default=0.3, description="过期文档固定惩罚因子 (×0.3)")
 
     # 后台任务配置
     CELERY_BROKER_URL: Optional[str] = Field(default=None, description="Celery代理URL")

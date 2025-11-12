@@ -65,11 +65,11 @@
                                 <p class="text-xs text-gray-500 dark:text-gray-400">智能保险助手</p>
                             </div>
                         </div>
-                        <button class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group" onclick="toggleSidebar()">
+                        <button id="toggleSidebarBtn" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group">
                             <i class="fas fa-bars text-gray-500 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-white transition-colors"></i>
                         </button>
                     </div>
-                    <button class="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl sidebar-content" onclick="startNewChat()">
+                    <button id="startNewChatBtn" class="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl sidebar-content">
                         <i class="fas fa-plus text-sm"></i>
                         <span class="font-medium sidebar-text">新建对话</span>
                     </button>
@@ -80,7 +80,7 @@
                     <div class="px-4 py-3 sidebar-content">
                         <div class="flex items-center justify-between mb-2">
                             <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider sidebar-text">聊天历史</h3>
-                            <button class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors" onclick="clearChatHistory()" title="清空历史">
+                            <button id="clearChatHistoryBtn" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors" title="清空历史">
                                 <i class="fas fa-trash-alt text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"></i>
                             </button>
                         </div>
@@ -93,15 +93,15 @@
                 <!-- 侧边栏底部 -->
                 <div class="flex-shrink-0 p-4 border-t border-gray-200 dark:border-gray-700 sidebar-content">
                     <div class="space-y-1 mb-4">
-                        <button class="w-full flex items-center space-x-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group" onclick="exportChat()">
+                        <button id="exportChatBtn" class="w-full flex items-center space-x-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group">
                             <i class="fas fa-download text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors"></i>
                             <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">导出对话</span>
                         </button>
-                        <button class="w-full flex items-center space-x-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group" onclick="shareChat()">
+                        <button id="shareChatBtn" class="w-full flex items-center space-x-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group">
                             <i class="fas fa-share-alt text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors"></i>
                             <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">分享对话</span>
                         </button>
-                        <button class="w-full flex items-center space-x-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group" onclick="openSettings()">
+                        <button id="settingsBtn" class="w-full flex items-center space-x-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors group">
                             <i class="fas fa-cog text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors"></i>
                             <span class="text-sm text-gray-700 dark:text-gray-300 sidebar-text">设置</span>
                         </button>
@@ -127,10 +127,10 @@
             <div class="bg-gray-50 dark:bg-gray-850 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between">
                 <h2 class="text-lg font-medium text-gray-900 dark:text-white">InsurIntellect</h2>
                 <div class="flex items-center space-x-2">
-                    <button onclick="exportChat()" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors" title="导出对话">
+                    <button id="exportChatTopBtn" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors" title="导出对话">
                         <i class="fas fa-download text-gray-600 dark:text-gray-400"></i>
                     </button>
-                    <button onclick="toggleTheme()" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors" title="切换主题">
+                    <button id="themeToggleBtn" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors" title="切换主题">
                         <i class="fas fa-moon text-gray-600 dark:text-gray-400" id="themeIcon"></i>
                     </button>
                 </div>
@@ -159,25 +159,25 @@
                         <div class="space-y-4 animate-slide-up">
                             <h2 class="text-xl font-medium text-gray-900 dark:text-white text-center mb-6">开始对话</h2>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl mx-auto">
-                                <button class="btn-professional text-left" onclick="sendPrompt('帮我分析一下重疾险的保障范围和理赔条件')">
+                                <button class="btn-professional text-left" data-prompt="帮我分析一下重疾险的保障范围和理赔条件">
                                     <div class="flex items-center space-x-3">
                                         <i class="fas fa-heartbeat text-gray-500 dark:text-gray-400"></i>
                                         <span>重疾险分析</span>
                                     </div>
                                 </button>
-                                <button class="btn-professional text-left" onclick="sendPrompt('我想了解意外险的保障内容')">
+                                <button class="btn-professional text-left" data-prompt="我想了解意外险的保障内容">
                                     <div class="flex items-center space-x-3">
                                         <i class="fas fa-shield-alt text-gray-500 dark:text-gray-400"></i>
                                         <span>意外险咨询</span>
                                     </div>
                                 </button>
-                                <button class="btn-professional text-left" onclick="sendPrompt('我想了解不同年龄段应该如何配置保险')">
+                                <button class="btn-professional text-left" data-prompt="我想了解不同年龄段应该如何配置保险">
                                     <div class="flex items-center space-x-3">
                                         <i class="fas fa-users text-gray-500 dark:text-gray-400"></i>
                                         <span>保险配置建议</span>
                                     </div>
                                 </button>
-                                <button class="btn-professional text-left" onclick="sendPrompt('请帮我比较几款热门的医疗险产品')">
+                                <button class="btn-professional text-left" data-prompt="请帮我比较几款热门的医疗险产品">
                                     <div class="flex items-center space-x-3">
                                         <i class="fas fa-hospital text-gray-500 dark:text-gray-400"></i>
                                         <span>医疗险对比</span>
@@ -196,10 +196,8 @@
                             placeholder="输入您的问题..."
                             rows="1"
                             class="chat-input"
-                            onkeydown="handleKeyDown(event)"
-                            oninput="autoResizeTextarea(this)"
                         ></textarea>
-                        <button class="send-button" onclick="sendMessage()" id="sendButton" disabled>
+                        <button class="send-button" id="sendButton" disabled>
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M7 11L12 6L17 11M12 18V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>

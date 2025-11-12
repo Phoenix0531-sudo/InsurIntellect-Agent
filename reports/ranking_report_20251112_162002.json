@@ -1,0 +1,140 @@
+{
+  "summary": {
+    "timestamp": "2025-11-12 16:20:02",
+    "total": 11,
+    "passed": 0,
+    "failed": 11,
+    "pass_ratio": 0.0
+  },
+  "details": [
+    {
+      "category": "new_document_recall",
+      "id": "recall-001",
+      "query": "请给我最近发布的车险条款更新摘要",
+      "passed": false,
+      "info": {
+        "elapsed": 0.125,
+        "top_checked": 5,
+        "selected": 1,
+        "ranked": 1
+      }
+    },
+    {
+      "category": "new_document_recall",
+      "id": "recall-002",
+      "query": "最新的人寿保险费率变更说明有哪些？",
+      "passed": false,
+      "info": {
+        "elapsed": 0.097,
+        "top_checked": 5,
+        "selected": 1,
+        "ranked": 1
+      }
+    },
+    {
+      "category": "new_document_recall",
+      "id": "recall-003",
+      "query": "近期健康险报销规则有何更新？",
+      "passed": false,
+      "info": {
+        "elapsed": 0.099,
+        "top_checked": 5,
+        "selected": 1,
+        "ranked": 1
+      }
+    },
+    {
+      "category": "new_document_recall",
+      "id": "recall-004",
+      "query": "旅行险保障条款近期版本变更总结",
+      "passed": false,
+      "info": {
+        "elapsed": 0.51,
+        "top_checked": 5,
+        "selected": 5,
+        "ranked": 5
+      }
+    },
+    {
+      "category": "new_document_recall",
+      "id": "recall-005",
+      "query": "财产险最近版本的赔付流程说明",
+      "passed": false,
+      "info": {
+        "elapsed": 0.104,
+        "top_checked": 5,
+        "selected": 1,
+        "ranked": 1
+      }
+    },
+    {
+      "category": "expired_document_suppression",
+      "id": "suppress-001",
+      "query": "车险理赔指南（包含旧版与新版）",
+      "passed": false,
+      "info": {
+        "elapsed": 0.209,
+        "selected": 2,
+        "ranked": 2,
+        "max_rank_for_expired": 8
+      }
+    },
+    {
+      "category": "expired_document_suppression",
+      "id": "suppress-002",
+      "query": "人寿险产品说明书（多版本并存）",
+      "passed": false,
+      "info": {
+        "elapsed": 0.102,
+        "selected": 1,
+        "ranked": 1,
+        "max_rank_for_expired": 8
+      }
+    },
+    {
+      "category": "expired_document_suppression",
+      "id": "suppress-003",
+      "query": "健康险报销政策（历史版本与最新版本）",
+      "passed": false,
+      "info": {
+        "elapsed": 0.328,
+        "selected": 2,
+        "ranked": 2,
+        "max_rank_for_expired": 8
+      }
+    },
+    {
+      "category": "regulatory_alignment",
+      "id": "reg-001",
+      "query": "银保监会关于健康险报销合规要求的最新通知",
+      "passed": false,
+      "info": {
+        "elapsed": 0.526,
+        "affected_count": 0,
+        "gains": []
+      }
+    },
+    {
+      "category": "regulatory_alignment",
+      "id": "reg-002",
+      "query": "ESG评级对人寿险产品销售的监管影响",
+      "passed": false,
+      "info": {
+        "elapsed": 0.262,
+        "affected_count": 0,
+        "gains": []
+      }
+    },
+    {
+      "category": "regulatory_alignment",
+      "id": "reg-003",
+      "query": "合规检查中车险保费计算规则的整改建议",
+      "passed": false,
+      "info": {
+        "elapsed": 0.23,
+        "affected_count": 0,
+        "gains": []
+      }
+    }
+  ]
+}
