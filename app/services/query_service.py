@@ -1,9 +1,10 @@
-﻿"""
+"""
 查询服务
 整合向量搜索和LLM生成,提供完整的问答功能
 """
 
 from datetime import datetime
+import asyncio
 from typing import List, Dict, Any, Optional
 import json
 from functools import lru_cache
@@ -15,10 +16,12 @@ from app.core.app_logging import get_logger
 from app.models.database_models import QueryHistory, Document, DocumentChunk
 from app.models.schemas import QueryRequest, QueryResponse, RetrievedChunk, QueryStatistics
 from app.core.rag_workflow import get_agent
+from app.core.database import db_manager
 from app.services.llm_service import LLMService
 from app.services.query_rewriter_service import QueryRewriterService
 from app.services.query_router_service import QueryRouterService
 from app.services.text_to_sql_service import TextToSQLService
+from app.services.kg_service import KGService
 
 logger = get_logger(__name__)
 
@@ -191,10 +194,11 @@ class QueryService:
         """处理查询请求，支持非流与SSE流（统一入口）。"""
         start_time = datetime.utcnow()
 
-        # 统一：准备 Agent、LLM 与可选查询重写
+        # 统一：准备 Agent、LLM（轻量/核心）与可选查询重写
         agent = self.agent
-        llm = LLMService()
-        rewriter = QueryRewriterService(llm_service=llm)
+        llm_core = LLMService.with_model(settings.OPENAI_MODEL_CORE)
+        llm_light = LLMService.with_model(settings.OPENAI_MODEL_LIGHT)
+        rewriter = QueryRewriterService(llm_service=llm_light)
 
         async def _rewrite_if_enabled(user_q: str) -> Dict[str, Any]:
             if not settings.ENABLE_QUERY_REWRITING:
@@ -212,9 +216,14 @@ class QueryService:
                 # 使用独立查询作为检索输入
                 question_for_retrieval = rewrite_result.get("independent_query") or request.question
 
-                # 在构建上下文前调用路由器（R4.2）
-                router = QueryRouterService(llm_service=llm)
-                route_result = await router.route_query(request.question)
+                # 在构建上下文前调用路由器（R4.2），受开关控制
+                route_result = {"route": "RAG"}
+                if settings.ENABLE_QUERY_ROUTING:
+                    router = QueryRouterService(llm_service=llm_light)
+                    try:
+                        route_result = await router.route_query(request.question)
+                    except Exception as re:
+                        logger.warning(f"查询路由失败，回退RAG: {re}")
 
                 if route_result.get("route") == "SQL":
                     # SQL 路径：执行只读查询并用 LLM 总结（R4.3）
@@ -240,7 +249,7 @@ class QueryService:
                         }
                     ]
 
-                    gen_res = await llm.agenerate_response(
+                    gen_res = await llm_core.agenerate_response(
                         query=request.question,
                         context_chunks=sql_context,
                     )
@@ -259,46 +268,78 @@ class QueryService:
                         query_id=None,
                     )
 
-                    # 保存查询历史（记录路由与SQL）
+                    # 后台保存查询历史，避免阻塞主流程
                     try:
-                        rewriting_metadata_json = None
                         meta_payload = {
                             "route": "SQL",
                             "sql_query": sql_query,
                             "sql_result_count": len(sql_rows),
                         }
                         try:
-                            # 合并重写元数据（若存在）
                             if rewrite_result:
                                 meta_payload.update({
                                     "primary_search_intent": rewrite_result.get("primary_search_intent"),
                                     "query_vectors": rewrite_result.get("query_vectors"),
                                     "micro_ontology": rewrite_result.get("micro_ontology"),
                                 })
-                            rewriting_metadata_json = json.dumps(meta_payload, ensure_ascii=False)
                         except Exception:
-                            rewriting_metadata_json = json.dumps({"route": "SQL", "sql_query": sql_query}, ensure_ascii=False)
-
-                        query_id = await self._save_query_history(
-                            db,
-                            request.question,
-                            answer_text,
-                            request.query_type,
-                            response_time,
-                            0,
-                            getattr(request, "session_id", None),
-                            rewritten_query=(rewrite_result.get("independent_query") if rewrite_result else None),
-                            rewriting_metadata_json=rewriting_metadata_json,
-                            retrieved_chunks_json=None,
+                            pass
+                        rewriting_metadata_json = json.dumps(meta_payload, ensure_ascii=False)
+                        asyncio.create_task(
+                            self._save_query_history_bg(
+                                question=request.question,
+                                answer=answer_text,
+                                query_type=request.query_type,
+                                response_time=response_time,
+                                chunks_used=0,
+                                session_id=getattr(request, "session_id", None),
+                                rewritten_query=(rewrite_result.get("independent_query") if rewrite_result else None),
+                                rewriting_metadata_json=rewriting_metadata_json,
+                                retrieved_chunks_json=None,
+                            )
                         )
-                        response.query_id = query_id
                     except Exception as save_error:
-                        logger.warning(f"查询历史保存失败(SQL路径): {save_error}")
+                        logger.debug(f"查询历史后台保存启动失败(SQL路径): {save_error}")
 
                     return response
 
                 # 异步构建上下文（T3: asyncio.to_thread 包装同步I/O）
-                ctx = await agent.abuild_context(question_for_retrieval)
+                try:
+                    ctx = await asyncio.wait_for(
+                        agent.abuild_context(question_for_retrieval),
+                        timeout=getattr(settings, "CONTEXT_BUILD_TIMEOUT_SECS", 5),
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("上下文构建超时，返回降级响应")
+                    response_time = (datetime.utcnow() - start_time).total_seconds()
+                    fallback = QueryResponse(
+                        question=request.question,
+                        answer="系统当前繁忙，检索上下文构建超时，请稍后重试。",
+                        query_type=request.query_type,
+                        response_time=response_time,
+                        chunks_used=0,
+                        retrieved_chunks=[],
+                        confidence_score=0.0,
+                        query_id=None,
+                    )
+                    # 后台保存，不阻塞
+                    try:
+                        asyncio.create_task(
+                            self._save_query_history_bg(
+                                question=request.question,
+                                answer=fallback.answer,
+                                query_type=request.query_type,
+                                response_time=response_time,
+                                chunks_used=0,
+                                session_id=getattr(request, "session_id", None),
+                                rewritten_query=None,
+                                rewriting_metadata_json=json.dumps({"route": "RAG", "degraded": True}, ensure_ascii=False),
+                                retrieved_chunks_json=None,
+                            )
+                        )
+                    except Exception:
+                        pass
+                    return fallback
                 retrieved_chunks = ctx.get("retrieved_chunks", []) or []
                 rewritten_query = (
                     ctx.get("rewritten_query")
@@ -306,11 +347,99 @@ class QueryService:
                     or (question_for_retrieval if question_for_retrieval != request.question else None)
                 )
 
+                # 注入 KG 事实作为优先片段
+                try:
+                    kg_service = KGService()
+                    kg_facts = await kg_service.aget_facts(db, question_for_retrieval)
+                    if kg_facts:
+                        kg_chunk = {
+                            "chunk_id": None,
+                            "document_id": None,
+                            "document_name": "知识图谱事实",
+                            "content": "\n".join([f"- {f}" for f in kg_facts]),
+                            "page_number": "N/A",
+                            "similarity_score": 1.0,
+                            "metadata": {"is_kg": True, "facts_count": len(kg_facts)},
+                        }
+                        retrieved_chunks = [kg_chunk] + retrieved_chunks
+                except Exception as kg_err:
+                    logger.debug(f"KG事实注入失败：{kg_err}")
+
                 # 非流式：调用异步非流 LLM（T2）
-                gen_res = await llm.agenerate_response(
-                    query=request.question,
-                    context_chunks=retrieved_chunks,
-                )
+                try:
+                    gen_res = await asyncio.wait_for(
+                        llm_core.agenerate_response(
+                            query=request.question,
+                            context_chunks=retrieved_chunks,
+                        ),
+                        timeout=getattr(settings, "LLM_ANSWER_TIMEOUT_SECS", 25),
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("LLM生成超时，返回降级响应")
+                    answer_text = "系统当前繁忙，生成答案超时，请稍后重试。"
+                    response_time = (datetime.utcnow() - start_time).total_seconds()
+                    response = QueryResponse(
+                        question=request.question,
+                        answer=answer_text,
+                        query_type=request.query_type,
+                        response_time=response_time,
+                        chunks_used=len(retrieved_chunks),
+                        retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
+                        confidence_score=0.0,
+                        query_id=None,
+                    )
+                    # 后台保存，不阻塞
+                    try:
+                        rewriting_metadata_json = json.dumps({"route": "RAG", "degraded": True}, ensure_ascii=False)
+                        asyncio.create_task(
+                            self._save_query_history_bg(
+                                question=request.question,
+                                answer=answer_text,
+                                query_type=request.query_type,
+                                response_time=response_time,
+                                chunks_used=len(retrieved_chunks),
+                                session_id=getattr(request, "session_id", None),
+                                rewritten_query=None,
+                                rewriting_metadata_json=rewriting_metadata_json,
+                                retrieved_chunks_json=json.dumps(retrieved_chunks, ensure_ascii=False) if retrieved_chunks else None,
+                            )
+                        )
+                    except Exception:
+                        pass
+                    return response
+                except TimeoutError:
+                    logger.warning("LLM并发队列等待超时，返回降级响应")
+                    answer_text = "系统当前繁忙，请稍后重试。"
+                    response_time = (datetime.utcnow() - start_time).total_seconds()
+                    response = QueryResponse(
+                        question=request.question,
+                        answer=answer_text,
+                        query_type=request.query_type,
+                        response_time=response_time,
+                        chunks_used=len(retrieved_chunks),
+                        retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
+                        confidence_score=0.0,
+                        query_id=None,
+                    )
+                    # 后台保存，不阻塞
+                    try:
+                        rewriting_metadata_json = json.dumps({"route": "RAG", "degraded": True, "reason": "queue_timeout"}, ensure_ascii=False)
+                        asyncio.create_task(
+                            self._save_query_history_bg(
+                                question=request.question,
+                                answer=answer_text,
+                                query_type=request.query_type,
+                                response_time=response_time,
+                                chunks_used=len(retrieved_chunks),
+                                session_id=getattr(request, "session_id", None),
+                                rewritten_query=None,
+                                rewriting_metadata_json=rewriting_metadata_json,
+                                retrieved_chunks_json=json.dumps(retrieved_chunks, ensure_ascii=False) if retrieved_chunks else None,
+                            )
+                        )
+                    except Exception:
+                        pass
+                    return response
 
                 answer_text = gen_res.get("answer", "")
                 response_time = (datetime.utcnow() - start_time).total_seconds()
@@ -327,8 +456,8 @@ class QueryService:
                 )
 
                 # 保存查询历史
+                # 后台保存，不阻塞
                 try:
-                    # 记录路由为 RAG，并合并重写元数据（若存在）
                     meta_payload = {"route": "RAG"}
                     try:
                         if rewrite_result:
@@ -338,25 +467,23 @@ class QueryService:
                                 "micro_ontology": rewrite_result.get("micro_ontology"),
                             })
                     except Exception:
-                        # 忽略重写元数据合并错误
                         pass
                     rewriting_metadata_json = json.dumps(meta_payload, ensure_ascii=False)
-
-                    query_id = await self._save_query_history(
-                        db,
-                        request.question,
-                        answer_text,
-                        request.query_type,
-                        response_time,
-                        len(retrieved_chunks),
-                        getattr(request, "session_id", None),
-                        rewritten_query=rewritten_query,
-                        rewriting_metadata_json=rewriting_metadata_json,
-                        retrieved_chunks_json=json.dumps(retrieved_chunks, ensure_ascii=False) if retrieved_chunks else None,
+                    asyncio.create_task(
+                        self._save_query_history_bg(
+                            question=request.question,
+                            answer=answer_text,
+                            query_type=request.query_type,
+                            response_time=response_time,
+                            chunks_used=len(retrieved_chunks),
+                            session_id=getattr(request, "session_id", None),
+                            rewritten_query=rewritten_query,
+                            rewriting_metadata_json=rewriting_metadata_json,
+                            retrieved_chunks_json=json.dumps(retrieved_chunks, ensure_ascii=False) if retrieved_chunks else None,
+                        )
                     )
-                    response.query_id = query_id
                 except Exception as save_error:
-                    logger.warning(f"查询历史保存失败: {save_error}")
+                    logger.debug(f"查询历史后台保存启动失败: {save_error}")
 
                 return response
             except Exception as e:
@@ -373,19 +500,19 @@ class QueryService:
                     query_id=None,
                 )
                 try:
-                    query_id = await self._save_query_history(
-                        db,
-                        request.question,
-                        error_response.answer,
-                        request.query_type,
-                        response_time,
-                        0,
-                        getattr(request, "session_id", None),
-                        rewritten_query=None,
-                        rewriting_metadata_json=json.dumps({"route": "RAG"}, ensure_ascii=False),
-                        retrieved_chunks_json=None,
+                    asyncio.create_task(
+                        self._save_query_history_bg(
+                            question=request.question,
+                            answer=error_response.answer,
+                            query_type=request.query_type,
+                            response_time=response_time,
+                            chunks_used=0,
+                            session_id=getattr(request, "session_id", None),
+                            rewritten_query=None,
+                            rewriting_metadata_json=json.dumps({"route": "RAG"}, ensure_ascii=False),
+                            retrieved_chunks_json=None,
+                        )
                     )
-                    error_response.query_id = query_id
                 except Exception:
                     pass
                 return error_response
@@ -406,9 +533,14 @@ class QueryService:
                 yield f"event: start\n"
                 yield f"data: {_json.dumps(start_evt, ensure_ascii=False)}\n\n"
 
-                # 在构建上下文前调用路由器（R4.2 - 流式路径）
-                router = QueryRouterService(llm_service=llm)
-                route_result = await router.route_query(request.question)
+                # 在构建上下文前调用路由器（R4.2 - 流式路径），受开关控制
+                route_result = {"route": "RAG"}
+                if settings.ENABLE_QUERY_ROUTING:
+                    router = QueryRouterService(llm_service=llm)
+                    try:
+                        route_result = await router.route_query(request.question)
+                    except Exception as re:
+                        logger.warning(f"流式查询路由失败，回退RAG: {re}")
                 if route_result.get("route") == "SQL":
                     # SQL 路径：直接执行并总结，随后发送 end 事件
                     t2s = TextToSQLService()
@@ -490,6 +622,24 @@ class QueryService:
                     or (question_for_retrieval if question_for_retrieval != request.question else None)
                 )
 
+                # 注入 KG 事实作为优先片段（SSE 路径）
+                try:
+                    kg_service = KGService()
+                    kg_facts = await kg_service.aget_facts(db, question_for_retrieval)
+                    if kg_facts:
+                        kg_chunk = {
+                            "chunk_id": None,
+                            "document_id": None,
+                            "document_name": "知识图谱事实",
+                            "content": "\n".join([f"- {f}" for f in kg_facts]),
+                            "page_number": "N/A",
+                            "similarity_score": 1.0,
+                            "metadata": {"is_kg": True, "facts_count": len(kg_facts)},
+                        }
+                        retrieved_chunks = [kg_chunk] + retrieved_chunks
+                except Exception as kg_err:
+                    logger.debug(f"KG事实注入失败(流式)：{kg_err}")
+
                 context_evt = {
                     "type": "context",
                     "rewritten_query": rewritten_query,
@@ -524,7 +674,7 @@ class QueryService:
 
                 # 调用LLM流式生成：agenerate_stream 直接 yield 文本增量
                 final_text = ""
-                async for content in llm.agenerate_stream(
+                async for content in llm_core.agenerate_stream(
                     query=request.question,
                     context_chunks=retrieved_chunks,
                 ):
@@ -607,8 +757,9 @@ class QueryService:
             try:
                 # 准备 Agent 与（可选）查询重写
                 agent = self.agent
-                llm = LLMService()
-                rewriter = QueryRewriterService(llm_service=llm)
+                llm_core = LLMService.with_model(settings.OPENAI_MODEL_CORE)
+                llm_light = LLMService.with_model(settings.OPENAI_MODEL_LIGHT)
+                rewriter = QueryRewriterService(llm_service=llm_light)
                 question_for_retrieval = request.question
                 rewrite_result: Dict[str, Any] = {}
                 if settings.ENABLE_QUERY_REWRITING:
@@ -817,6 +968,36 @@ class QueryService:
             except Exception:
                 pass
             return None
+
+    async def _save_query_history_bg(
+        self,
+        question: str,
+        answer: str,
+        query_type: str,
+        response_time: float,
+        chunks_used: int,
+        session_id: Optional[str] = None,
+        rewritten_query: Optional[str] = None,
+        rewriting_metadata_json: Optional[str] = None,
+        retrieved_chunks_json: Optional[str] = None,
+    ) -> None:
+        """后台保存查询历史：自行创建/关闭会话，避免阻塞主请求。"""
+        try:
+            async with db_manager.SessionLocal() as session:
+                await self._save_query_history(
+                    db=session,
+                    question=question,
+                    answer=answer,
+                    query_type=query_type,
+                    response_time=response_time,
+                    chunks_used=chunks_used,
+                    session_id=session_id,
+                    rewritten_query=rewritten_query,
+                    rewriting_metadata_json=rewriting_metadata_json,
+                    retrieved_chunks_json=retrieved_chunks_json,
+                )
+        except Exception as e:
+            logger.debug(f"后台保存查询历史失败: {e}")
 
     async def get_query_history(
         self,

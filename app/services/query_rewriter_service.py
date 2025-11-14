@@ -57,8 +57,9 @@ class QueryRewriterService:
         ]
 
         try:
-            content = await self.llm._chat_completion(messages, temperature=0.2, max_tokens=512)
-            cleaned = content.strip()
+            resp = await self.llm.agenerate_structured_decision(messages, temperature=0.2, max_tokens=512)
+            raw = resp.choices[0].message.content if resp and getattr(resp, "choices", None) else ""
+            cleaned = (raw or "").strip()
             # 清理可能的 Markdown 代码块包装
             if cleaned.startswith("```"):
                 cleaned = cleaned.strip("`")

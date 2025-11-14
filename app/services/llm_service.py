@@ -16,26 +16,48 @@ logger = get_logger(__name__)
 class LLMService:
     """大语言模型服务：与LLM交互并生成问答"""
 
-    def __init__(self):
+    def __init__(self, *, model_name: Optional[str] = None, max_tokens: Optional[int] = None, temperature: Optional[float] = None):
         # 初始化 OpenAI 客户端，配置超时（重试由本类统一管理）
+        # 兼容硅基流动：允许从 OPENAI_API_KEY/SILICONFLOW_API_KEY 与 OPENAI_BASE_URL/SILICONFLOW_BASE_URL 回退
+        api_key = settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY
+        base_url = settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL
+
         self.client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL,
-            timeout=30.0,
+            api_key=api_key,
+            base_url=base_url,
+            timeout=float(settings.OPENAI_TIMEOUT_SECS),
             max_retries=0,
         )
 
-        self.model = settings.OPENAI_MODEL
-        self.max_tokens = settings.OPENAI_MAX_TOKENS
-        self.temperature = settings.OPENAI_TEMPERATURE
+        # 允许构造时覆盖模型与采样参数（用于轻量/核心分工）
+        self.model = (model_name or settings.OPENAI_MODEL)
+        self.max_tokens = (max_tokens if max_tokens is not None else settings.OPENAI_MAX_TOKENS)
+        self.temperature = (temperature if temperature is not None else settings.OPENAI_TEMPERATURE)
 
-        # 并发限制（实例级 Semaphore，用于验收标准 T2.2）
-        self.semaphore = asyncio.Semaphore(settings.LLM_MAX_CONCURRENCY)
+        # 分层模型：核心（重量）与轻量模型名称
+        try:
+            self.core_model_name = getattr(settings, "OPENAI_MODEL_CORE", None) or self.model
+        except Exception:
+            self.core_model_name = self.model
+        try:
+            self.light_model_name = getattr(settings, "OPENAI_MODEL_LIGHT", None) or self.model
+        except Exception:
+            self.light_model_name = self.model
+
+        # 并发限制（全局 Semaphore，跨实例共享，确保总并发受控）
+        if not hasattr(LLMService, "_global_semaphore") or LLMService._global_semaphore is None:
+            LLMService._global_semaphore = asyncio.Semaphore(settings.LLM_MAX_CONCURRENCY)
+        self.semaphore = LLMService._global_semaphore
         # 熔断状态（类级别共享）
         if not hasattr(LLMService, "_failure_count"):
             LLMService._failure_count = 0
         if not hasattr(LLMService, "_circuit_opened_at"):
             LLMService._circuit_opened_at = None
+
+    @classmethod
+    def with_model(cls, model_name: str, *, max_tokens: Optional[int] = None, temperature: Optional[float] = None) -> "LLMService":
+        """工厂方法：按需指定模型/参数创建实例。"""
+        return cls(model_name=model_name, max_tokens=max_tokens, temperature=temperature)
 
     # --- 可靠性：熔断与退避重试 ---
     def _is_circuit_open(self) -> bool:
@@ -75,7 +97,11 @@ class LLMService:
         if self._is_circuit_open():
             raise RuntimeError("LLM 熔断中，请稍后重试")
 
-        await self.semaphore.acquire()
+        # 并发控制：等待不超过回答超时阈值，避免请求在队列中耗尽客户端超时
+        try:
+            await asyncio.wait_for(self.semaphore.acquire(), timeout=getattr(settings, "LLM_QUEUE_TIMEOUT_SECS", 0.75))
+        except asyncio.TimeoutError:
+            raise TimeoutError("LLM 并发队列等待超时")
         try:
             last_err: Optional[Exception] = None
             max_attempts = max(1, settings.LLM_MAX_RETRIES)
@@ -111,7 +137,10 @@ class LLMService:
         if self._is_circuit_open():
             raise RuntimeError("LLM 熔断中，请稍后重试")
 
-        await self.semaphore.acquire()
+        try:
+            await asyncio.wait_for(self.semaphore.acquire(), timeout=getattr(settings, "LLM_QUEUE_TIMEOUT_SECS", 0.75))
+        except asyncio.TimeoutError:
+            raise TimeoutError("LLM 并发队列等待超时(流式)")
         try:
             last_err: Optional[Exception] = None
             max_attempts = max(1, settings.LLM_MAX_RETRIES)
@@ -154,25 +183,43 @@ class LLMService:
         )
 
     def _build_user_prompt(self, query: str, context_chunks: List[Dict[str, Any]]) -> str:
-        """构建用户提示词"""
-        context_parts: List[str] = []
+        """构建用户提示词（支持知识图谱事实优先展示）。"""
+        kg_parts: List[str] = []
+        doc_parts: List[str] = []
+
         for i, chunk in enumerate(context_chunks, 1):
             content = chunk.get("content", "")
             page_num = chunk.get("page_number", "N/A")
             doc_name = chunk.get("document_name", "Unknown")
+            meta = chunk.get("metadata", {})
+            is_kg = False
+            try:
+                if isinstance(meta, dict):
+                    is_kg = bool(meta.get("is_kg"))
+            except Exception:
+                is_kg = False
 
-            context_parts.append(
-                f"文档片段 {i}:\n来源: {doc_name} (第{page_num}页)\n内容: {content}\n"
-            )
+            if is_kg:
+                kg_parts.append(content)
+            else:
+                doc_parts.append(
+                    f"文档片段 {i}:\n来源: {doc_name} (第{page_num}页)\n内容: {content}\n"
+                )
 
-        context = "\n".join(context_parts)
+        sections: List[str] = []
+        if kg_parts:
+            sections.append("知识图谱事实:\n" + "\n".join(kg_parts))
+        if doc_parts:
+            sections.append("文档片段:\n" + "\n".join(doc_parts))
+
+        context = "\n\n".join(sections) if sections else "(无上下文)"
 
         prompt = (
-            "基于以下保险文档内容，请回答用户的问题：\n\n"
+            "基于以下保险文档内容和知识图谱事实，请回答用户的问题：\n\n"
             f"{context}\n\n"
             f"用户问题：{query}\n\n"
-            "请基于上述文档内容回答问题。如果文档中没有相关信息，请说明 "
-            "'根据提供的文档内容，我无法找到相关信息来回答这个问题'。"
+            "请基于上述内容回答问题。如果没有相关信息，请明确说明："
+            "'根据提供的文档内容和事实，我无法找到相关信息来回答这个问题'。"
         )
         return prompt
 
@@ -189,7 +236,10 @@ class LLMService:
                 {"role": "user", "content": self._build_user_prompt(query, context_chunks)},
             ]
 
-            await self.semaphore.acquire()
+            try:
+                await asyncio.wait_for(self.semaphore.acquire(), timeout=getattr(settings, "LLM_QUEUE_TIMEOUT_SECS", 0.75))
+            except asyncio.TimeoutError:
+                raise TimeoutError("LLM 并发队列等待超时")
             try:
                 last_err: Optional[Exception] = None
                 max_attempts = max(1, settings.LLM_MAX_RETRIES)
@@ -197,7 +247,7 @@ class LLMService:
                 for attempt in range(max_attempts):
                     try:
                         response = await self.client.chat.completions.create(
-                            model=self.model,
+                            model=self.core_model_name,
                             messages=messages,
                             max_tokens=(max_tokens or self.max_tokens),
                             temperature=(temperature if temperature is not None else self.temperature),
@@ -224,7 +274,7 @@ class LLMService:
 
             return {
                 "answer": answer,
-                "model_used": self.model,
+                "model_used": self.core_model_name,
                 "tokens_used": tokens_used,
                 "response_time": response_time,
                 "success": True,
@@ -235,7 +285,7 @@ class LLMService:
             logger.error(f"LLM回复生成失败: {e}")
             return {
                 "answer": "抱歉, 生成回复时出现错误, 请稍后重试。",
-                "model_used": self.model,
+                "model_used": self.core_model_name,
                 "tokens_used": 0,
                 "response_time": response_time,
                 "success": False,
@@ -253,7 +303,10 @@ class LLMService:
             {"role": "user", "content": self._build_user_prompt(query, context_chunks)},
         ]
 
-        await self.semaphore.acquire()
+        try:
+            await asyncio.wait_for(self.semaphore.acquire(), timeout=getattr(settings, "LLM_QUEUE_TIMEOUT_SECS", 0.75))
+        except asyncio.TimeoutError:
+            raise TimeoutError("LLM 并发队列等待超时(流式)")
         try:
             last_err: Optional[Exception] = None
             max_attempts = max(1, settings.LLM_MAX_RETRIES)
@@ -261,7 +314,7 @@ class LLMService:
             for attempt in range(max_attempts):
                 try:
                     stream = await self.client.chat.completions.create(
-                        model=self.model,
+                        model=self.core_model_name,
                         messages=messages,
                         stream=True,
                         max_tokens=(max_tokens or self.max_tokens),
@@ -292,6 +345,51 @@ class LLMService:
             except Exception:
                 # 忽略单次解析异常，继续流
                 pass
+
+    async def agenerate_structured_decision(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        max_tokens: int = 256,
+        temperature: float = 0.0,
+    ) -> Any:
+        """
+        轻量任务：路由/意图/重写 等结构化决策调用，强制使用 light 模型。
+        返回 OpenAI ChatCompletion 响应对象，由调用方自行解析 JSON。
+        """
+        if self._is_circuit_open():
+            raise RuntimeError("LLM 熔断中，请稍后重试")
+
+        try:
+            await asyncio.wait_for(self.semaphore.acquire(), timeout=getattr(settings, "LLM_QUEUE_TIMEOUT_SECS", 0.75))
+        except asyncio.TimeoutError:
+            raise TimeoutError("LLM 并发队列等待超时")
+
+        try:
+            last_err: Optional[Exception] = None
+            max_attempts = max(1, settings.LLM_MAX_RETRIES)
+            for attempt in range(max_attempts):
+                try:
+                    resp = await self.client.chat.completions.create(
+                        model=self.light_model_name,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    )
+                    self._record_success()
+                    return resp
+                except Exception as e:
+                    last_err = e
+                    self._record_failure()
+                    if attempt >= max_attempts - 1:
+                        break
+                    delay = self._backoff_seconds(attempt)
+                    logger.warning(f"LLM 轻量决策失败（第 {attempt+1} 次），退避 {delay:.2f}s：{e}")
+                    await asyncio.sleep(delay)
+            if last_err is not None:
+                raise last_err
+        finally:
+            self.semaphore.release()
 
     async def generate_answer(self, query: str, context_chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
         """生成问答回复"""

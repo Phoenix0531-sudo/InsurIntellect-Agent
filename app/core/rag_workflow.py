@@ -21,6 +21,7 @@ import os
 import json
 import logging
 from app.core.app_logging import get_logger as app_get_logger
+import numpy as np
 from typing import Dict, List, Any, Tuple
 from datetime import datetime
 import asyncio
@@ -36,6 +37,8 @@ from langchain_chroma import Chroma
 # 新增导入：用于构建提示与解析输出（AI判别辅助）
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from pydantic import ValidationError
+from app.models.schemas import RegulatoryCheck, QueryIntent
 
 # 导入应用配置和提示模板
 from app.prompts import (
@@ -47,6 +50,7 @@ from app.core.timeliness import compute_timeliness_score
 from app.core.fusion import reciprocal_rank_fusion
 import jieba
 from app.services.embedding_service import EmbeddingService
+from app.services.query_intent_service import QueryIntentService
 
 # Configure logging
 logging.basicConfig(
@@ -96,6 +100,11 @@ class InsurIntellectAgent:
                 app_get_logger("insurintellect").info("嵌入服务初始化成功（双模式）")
             except Exception:
                 pass
+            # 意图分类服务（KCP-FIX-4）
+            try:
+                self.intent_service = QueryIntentService()
+            except Exception:
+                self.intent_service = None
             
             # 初始化向量数据库
             try:
@@ -428,15 +437,15 @@ class InsurIntellectAgent:
     # 新增：动态排序主函数（攻关任务四规则）
     def _dynamic_ranking(self, docs: List[Document], query: str) -> List[Document]:
         """
-        使用批准的业务规则进行动态排序：
-        final_score = (W_orig * similarity) + (W_biz * business_score)
-        business_score = timeliness_boost + compliance_boost
+        使用批准的业务规则进行动态排序（包含 Min-Max 归一化）：
+        原始：business_score = timeliness_boost + compliance_boost
+        归一化后加权：final_score = (W_orig * norm_sim) + (W_biz * norm_biz)
         规则：
         - timeliness_boost: 若 (today - effective_date) <= 180 天，则 +0.3，否则 0.0
         - compliance_boost: 文档含有 ESG 关键词（RERANK_COMPLIANCE_KEYWORDS）则 +0.1
         - expired: 若 expiry_date <= today，则 final_score *= 0.5
         - abolition: 若 abolition_date <= today，则剔除该文档块
-        - 不进行 min-max 归一化；相似度为 [0,1] 的语义相似度
+        - 对 business_score 必须进行 Min-Max 归一化；similarity 亦进行 Min-Max 归一化（如分布良好则等效）
         - 应用 SIMILARITY_THRESHOLD 初筛
         """
 
@@ -511,24 +520,43 @@ class InsurIntellectAgent:
                 return True
             return False
 
-        def _similarity(query_text: str, doc_text: str) -> float:
+        # (FIX-2.2) 获取查询向量（仅一次，优先使用异步接口）
+        try:
             try:
-                qv = self.embeddings.embed_query(query_text)
-                dv = self.embeddings.embed_documents([doc_text or ""])[0]
-                # 余弦相似度 -> [0,1]
-                import math
-                dot = sum(a * b for a, b in zip(qv, dv))
-                # 防御性：避免数值溢出
-                cos = max(min(dot, 1.0), -1.0)
-                return (cos + 1.0) / 2.0
+                query_vector = asyncio.run(self.embedding_service.aembed_query(query))
+            except RuntimeError:
+                # 当事件循环已存在或不可运行时，回退到同步接口
+                query_vector = self.embedding_service.embed_query(query)
+        except Exception:
+            query_vector = None
+
+        def _similarity_precomputed(doc: Document) -> float:
+            try:
+                dv = (doc.metadata or {}).get("embedding")
+                if dv is None or query_vector is None:
+                    return 0.0
+                q = np.asarray(query_vector, dtype=np.float32)
+                d = np.asarray(dv, dtype=np.float32)
+                # 直接计算余弦相似度
+                denom = float(np.linalg.norm(q) * np.linalg.norm(d))
+                if denom == 0.0:
+                    return 0.0
+                cos = float(np.dot(q, d)) / denom
+                # 映射到 [0,1]
+                return (max(min(cos, 1.0), -1.0) + 1.0) / 2.0
             except Exception:
                 return 0.0
 
-        scored: List[tuple] = []
+        # 第一遍：收集原始分数（FIX-3.1）
+        candidates: List[Dict[str, Any]] = []
+        sim_list: List[float] = []
+        biz_list: List[float] = []
+
         for doc in docs:
             md = doc.metadata or {}
 
-            sim = _similarity(query, doc.page_content or "")
+            # 使用预存向量计算相似度
+            sim = _similarity_precomputed(doc)
             if sim < settings.SIMILARITY_THRESHOLD:
                 continue  # 初筛过滤掉语义相关度极低的
 
@@ -538,25 +566,69 @@ class InsurIntellectAgent:
 
             timeliness_boost = settings.RERANK_RECENCY_BOOST if _within_recent_180(md) else 0.0
             compliance_boost = settings.RERANK_COMPLIANCE_BOOST_SCORE if _has_esg(doc) else 0.0
-            business_score = timeliness_boost + compliance_boost
-
-            final_score = (settings.RERANK_ORIG_WEIGHT * sim) + (settings.RERANK_BIZ_WEIGHT * business_score)
+            business_score = float(timeliness_boost + compliance_boost)
             penalty = _expired_penalty_factor(md)
+
+            candidates.append({
+                "doc": doc,
+                "metadata": md,
+                "sim": float(sim),
+                "timeliness_boost": float(timeliness_boost),
+                "compliance_boost": float(compliance_boost),
+                "business_score": business_score,
+                "penalty": float(penalty),
+            })
+            sim_list.append(float(sim))
+            biz_list.append(business_score)
+
+        if not candidates:
+            return []
+
+        # 计算 Min-Max 归一化边界（FIX-3.2）
+        sim_min = float(np.min(sim_list)) if sim_list else 0.0
+        sim_max = float(np.max(sim_list)) if sim_list else 0.0
+        biz_min = float(np.min(biz_list)) if biz_list else 0.0
+        biz_max = float(np.max(biz_list)) if biz_list else 0.0
+
+        def _minmax(v: float, vmin: float, vmax: float) -> float:
+            try:
+                if vmax > vmin:
+                    return float((v - vmin) / (vmax - vmin))
+                else:
+                    return 0.0
+            except Exception:
+                return 0.0
+
+        # 第二遍：使用归一化分数进行加权求和（FIX-3.3）
+        scored: List[Tuple[float, Document]] = []
+        for item in candidates:
+            sim = item["sim"]
+            biz = item["business_score"]
+            penalty = item["penalty"]
+
+            norm_sim = _minmax(sim, sim_min, sim_max)
+            norm_biz = _minmax(biz, biz_min, biz_max)
+
+            final_score = (settings.RERANK_ORIG_WEIGHT * norm_sim) + (settings.RERANK_BIZ_WEIGHT * norm_biz)
             final_score *= penalty
 
-            # 写入审计字段
+            doc = item["doc"]
+            md = item["metadata"]
+
+            # 写入审计字段（包含原始与归一化分数）
             details = {
                 "original_similarity": round(sim, 6),
-                "timeliness_boost": round(timeliness_boost, 6),
-                "compliance_boost": round(compliance_boost, 6),
-                "business_score": round(business_score, 6),
+                "normalized_similarity": round(norm_sim, 6),
+                "timeliness_boost": round(item["timeliness_boost"], 6),
+                "compliance_boost": round(item["compliance_boost"], 6),
+                "business_score": round(biz, 6),
+                "normalized_business_score": round(norm_biz, 6),
                 "expired_penalty": round(penalty if penalty != 1.0 else 0.0, 6),
                 "final_score": round(final_score, 6),
             }
             try:
                 doc.metadata = md  # 确保可写
                 doc.metadata.setdefault("ranking_details", details)
-                # 若已有，则更新为当前计算结果
                 doc.metadata["ranking_details"] = details
             except Exception:
                 pass
@@ -571,35 +643,109 @@ class InsurIntellectAgent:
 
     # 新增：AI辅助方法——判断查询是否与监管高度相关
     def _is_query_regulatory(self, query: str) -> bool:
-        """使用AI判断一个查询是否与保险监管、法规或合规性高度相关"""
+        """使用AI判断一个查询是否与保险监管相关（强制返回结构化 JSON）。"""
         try:
-            prompt_text = (
-                "请判断以下用户问题是否与保险监管、法规或合规性高度相关？"
-                "请只回答'是'或'否'。\n\n"
-                f"问题：'{query}'"
+            import json as _json
+            schema_json = _json.dumps(RegulatoryCheck.model_json_schema(), ensure_ascii=False)
+            base_prompt = (
+                "你是保险监管判定助手。\n"
+                "任务：判断用户问题是否与保险监管、法规或合规性高度相关。\n"
+                "严格按照以下 JSON Schema 输出，仅返回一个 JSON 对象：\n"
+                f"{schema_json}\n\n"
+                "注意：\n- 只输出 JSON 对象，不要解释、不加代码块。\n"
+                "- 字段键名与类型必须与 Schema 完全一致。\n"
+                f"用户问题：{query}"
             )
-            prompt = ChatPromptTemplate.from_template(prompt_text)
+
+            def _clean_to_json_str(s: str) -> str:
+                s = (s or "").strip()
+                if "```" in s:
+                    try:
+                        s = s.split("```", 1)[1]
+                        s = s.replace("json", "", 1)
+                        s = s.split("```", 1)[0]
+                    except Exception:
+                        pass
+                l = s.find("{")
+                r = s.rfind("}")
+                if l != -1 and r != -1 and r > l:
+                    return s[l : r + 1]
+                return s
+
+            prompt = ChatPromptTemplate.from_template(base_prompt)
             chain = prompt | self.llm | StrOutputParser()
-            response = chain.invoke({})
-            return "是" in (response or "")
+            resp1 = chain.invoke({})
+            content1 = _clean_to_json_str(resp1)
+            try:
+                model1 = RegulatoryCheck.model_validate_json(content1)
+                return bool(model1.is_regulatory)
+            except ValidationError as ve:
+                logger.warning(f"监管查询判定 JSON 验证失败（首次）：{ve}")
+
+            retry_prompt = base_prompt + "\n\n再次强调：只输出纯 JSON 对象，不要任何解释或代码围栏。"
+            chain2 = ChatPromptTemplate.from_template(retry_prompt) | self.llm | StrOutputParser()
+            resp2 = chain2.invoke({})
+            content2 = _clean_to_json_str(resp2)
+            try:
+                model2 = RegulatoryCheck.model_validate_json(content2)
+                return bool(model2.is_regulatory)
+            except ValidationError as ve2:
+                logger.error(f"监管查询判定 JSON 验证失败（第二次）：{ve2}")
+                return False
         except Exception as e:
             logger.warning(f"判断查询监管相关性时出错: {e}")
             return False
 
     # 新增：AI辅助方法——判断文档是否与监管相关查询高度关联
     def _is_doc_related_to_regulatory_query(self, doc: Document, query: str) -> bool:
-        """使用AI判断一个文档是否与一个已知的监管相关查询高度关联"""
+        """使用AI判断文档是否与监管相关查询高度关联（强制结构化 JSON）。"""
         try:
-            doc_snippet = (doc.page_content or "")[:500]  # 取文档摘要进行判断，以提高效率
-            prompt_text = (
-                "已知用户问题是关于保险监管的。请判断以下文档摘要是否与这个问题高度相关？"
-                "请只回答'是'或'否'。\n\n"
-                f"用户问题：'{query}'\n\n文档摘要：'{doc_snippet}'"
+            import json as _json
+            schema_json = _json.dumps(RegulatoryCheck.model_json_schema(), ensure_ascii=False)
+            doc_snippet = (doc.page_content or "")[:500]
+            base_prompt = (
+                "已知用户问题是关于保险监管。请判断以下文档摘要是否与这个问题高度相关。\n"
+                "严格按照以下 JSON Schema 输出，仅返回一个 JSON 对象：\n"
+                f"{schema_json}\n\n"
+                "注意：\n- 只输出 JSON 对象，不要解释、不加代码块。\n"
+                f"用户问题：{query}\n\n文档摘要：{doc_snippet}"
             )
-            prompt = ChatPromptTemplate.from_template(prompt_text)
+
+            def _clean_to_json_str(s: str) -> str:
+                s = (s or "").strip()
+                if "```" in s:
+                    try:
+                        s = s.split("```", 1)[1]
+                        s = s.replace("json", "", 1)
+                        s = s.split("```", 1)[0]
+                    except Exception:
+                        pass
+                l = s.find("{")
+                r = s.rfind("}")
+                if l != -1 and r != -1 and r > l:
+                    return s[l : r + 1]
+                return s
+
+            prompt = ChatPromptTemplate.from_template(base_prompt)
             chain = prompt | self.llm | StrOutputParser()
-            response = chain.invoke({})
-            return "是" in (response or "")
+            resp1 = chain.invoke({})
+            content1 = _clean_to_json_str(resp1)
+            try:
+                model1 = RegulatoryCheck.model_validate_json(content1)
+                return bool(model1.is_regulatory)
+            except ValidationError as ve:
+                logger.warning(f"监管文档关联判定 JSON 验证失败（首次）：{ve}")
+
+            retry_prompt = base_prompt + "\n\n再次强调：只输出纯 JSON 对象，不要任何解释或代码围栏。"
+            chain2 = ChatPromptTemplate.from_template(retry_prompt) | self.llm | StrOutputParser()
+            resp2 = chain2.invoke({})
+            content2 = _clean_to_json_str(resp2)
+            try:
+                model2 = RegulatoryCheck.model_validate_json(content2)
+                return bool(model2.is_regulatory)
+            except ValidationError as ve2:
+                logger.error(f"监管文档关联判定 JSON 验证失败（第二次）：{ve2}")
+                return False
         except Exception as e:
             logger.warning(f"判断文档与监管查询关联性时出错: {e}")
             return False
@@ -621,9 +767,12 @@ class InsurIntellectAgent:
         }
         """
         try:
-            # 步骤1：查询架构师重写查询
-            architect_result = self.run_query_architect(user_query)
-            rewritten_query = architect_result.get("rewritten_query", user_query)
+            # 步骤1：查询架构师重写查询（遵循配置开关）
+            if not settings.ENABLE_QUERY_REWRITING:
+                rewritten_query = user_query
+            else:
+                architect_result = self.run_query_architect(user_query)
+                rewritten_query = architect_result.get("rewritten_query", user_query)
             standalone_query = rewritten_query
 
             # 步骤2：初步检索
@@ -718,10 +867,32 @@ class InsurIntellectAgent:
         }
         """
         try:
-            # 步骤1：查询架构师重写查询（同步 -> 线程）
-            architect_result = await asyncio.to_thread(self.run_query_architect, user_query)
-            rewritten_query = architect_result.get("rewritten_query", user_query)
+            # 步骤1：查询架构师重写查询（遵循配置，必要时启用微超时）
+            if not settings.ENABLE_QUERY_REWRITING:
+                rewritten_query = user_query
+            else:
+                try:
+                    # 微超时：避免在高并发下线程池被长时间占用
+                    micro_timeout = max(1.0, float(settings.CONTEXT_BUILD_TIMEOUT_SECS) - 1.0)
+                    architect_result = await asyncio.wait_for(
+                        asyncio.to_thread(self.run_query_architect, user_query),
+                        timeout=micro_timeout,
+                    )
+                    rewritten_query = architect_result.get("rewritten_query", user_query)
+                except Exception:
+                    # 超时或错误则直接回退使用原始查询
+                    rewritten_query = user_query
             standalone_query = rewritten_query
+
+            # 意图分类（KCP-FIX-4）：在重写后进行
+            metadata_filter: Dict[str, Any] | None = None
+            try:
+                if hasattr(self, "intent_service") and self.intent_service is not None:
+                    intent: QueryIntent = await self.intent_service.classify_intent(rewritten_query)
+                    metadata_filter = intent.metadata_filter or None
+                    logger.info(f"意图分类：{intent.intent}，应用过滤器：{metadata_filter}")
+            except Exception as e:
+                logger.warning(f"意图分类失败，继续无过滤：{e}")
 
             # 预先异步获取查询嵌入（双模式服务）（I2.1）
             try:
@@ -732,9 +903,30 @@ class InsurIntellectAgent:
             # 步骤2：并发检索（向量检索 n=50 与 BM25 n=50）
             logger.info(f"(async) 混合检索：向量与BM25并发，查询: {rewritten_query}")
 
+            def _matches_metadata_filter(md: Dict[str, Any], flt: Dict[str, Any] | None) -> bool:
+                if not flt:
+                    return True
+                try:
+                    for k, v in flt.items():
+                        if isinstance(v, dict) and "$in" in v:
+                            if md.get(k) not in v["$in"]:
+                                return False
+                        else:
+                            if str(md.get(k)).strip() != str(v).strip():
+                                return False
+                    return True
+                except Exception:
+                    return False
+
             async def _vector_search_k50() -> Tuple[List[Tuple[Document, float]], Dict[str, float], List[str]]:
                 try:
-                    results = await asyncio.to_thread(self.vectorstore.similarity_search_with_score, rewritten_query, k=50)
+                    # 传入动态元数据过滤（如底层不支持，则由回退路径处理）
+                    results = await asyncio.to_thread(
+                        self.vectorstore.similarity_search_with_score,
+                        rewritten_query,
+                        k=50,
+                        filter=metadata_filter,
+                    )
                     ids: List[str] = []
                     score_map: Dict[str, float] = {}
                     for doc, score in results:
@@ -754,6 +946,7 @@ class InsurIntellectAgent:
                             query_embeddings=[emb],
                             n_results=50,
                             include=["distances", "documents", "metadatas", "embeddings"],
+                            where=metadata_filter,
                         )
                         docs: List[Tuple[Document, float]] = []
                         score_map: Dict[str, float] = {}
@@ -789,6 +982,27 @@ class InsurIntellectAgent:
                     top_scored = scored[:50]
                     bm25_ids = [cid for cid, _ in top_scored]
                     bm25_scores = {cid: s for cid, s in top_scored}
+
+                    # 应用动态元数据过滤（通过底层元数据获取）
+                    if metadata_filter:
+                        try:
+                            collection = self.vectorstore._collection  # type: ignore[attr-defined]
+                            payload = await asyncio.to_thread(collection.get, ids=bm25_ids, include=["metadatas", "ids"])
+                            ids_list = payload.get("ids", []) or []
+                            metas_list = payload.get("metadatas", []) or []
+                            filtered_ids: List[str] = []
+                            filtered_scores: Dict[str, float] = {}
+                            for i in range(len(ids_list)):
+                                cid = ids_list[i]
+                                md = metas_list[i] or {}
+                                if _matches_metadata_filter(md, metadata_filter):
+                                    filtered_ids.append(cid)
+                                    filtered_scores[cid] = bm25_scores.get(cid, 0.0)
+                            bm25_ids = filtered_ids
+                            bm25_scores = filtered_scores
+                        except Exception as e:
+                            logger.warning(f"BM25 过滤应用失败，继续未过滤结果：{e}")
+
                     return bm25_ids, bm25_scores
                 except Exception:
                     return [], {}
@@ -894,11 +1108,22 @@ class InsurIntellectAgent:
     def _refetch_chunks_by_ids(self, chunk_ids: List[str]) -> List[Document]:
         try:
             collection = self.vectorstore._collection  # type: ignore[attr-defined]
-            payload = collection.get(ids=chunk_ids, include=["documents", "metadatas"])
+            # (FIX-1.2) 获取预存嵌入向量，避免在排序阶段重复计算
+            payload = collection.get(ids=chunk_ids, include=["documents", "metadatas", "embeddings"])
             out: List[Document] = []
             for i in range(len(payload.get("ids", []))):
                 text = payload.get("documents", [None])[i]
-                md = payload.get("metadatas", [None])[i]
+                md = payload.get("metadatas", [None])[i] or {}
+                try:
+                    emb = payload.get("embeddings", [None])[i]
+                except Exception:
+                    emb = None
+                # (FIX-1.3) 可选：将嵌入向量附加到元数据，供排序使用
+                if emb is not None:
+                    try:
+                        md["embedding"] = emb
+                    except Exception:
+                        pass
                 out.append(Document(page_content=text, metadata=md))
             return out
         except Exception:

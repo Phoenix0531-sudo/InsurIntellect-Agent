@@ -1064,8 +1064,14 @@ async function updateModelInfo() {
         console.log('找到model-status元素:', modelStatus);
         
         if (modelStatus) {
-            const modelName = data.model.split('/').pop() || data.model; // 提取模型名称
-            const statusText = `${modelName} 已连接`;
+            // 支持 core/light 字段，兼容旧字段 model
+            const coreRaw = data.core_model || data.model || '';
+            const lightRaw = data.light_model || data.model || '';
+            const coreName = (coreRaw && typeof coreRaw === 'string') ? (coreRaw.split('/').pop() || coreRaw) : '';
+            const lightName = (lightRaw && typeof lightRaw === 'string') ? (lightRaw.split('/').pop() || lightRaw) : '';
+            const statusText = (coreName && lightName)
+                ? `核心: ${coreName} / 轻量: ${lightName} 已连接`
+                : `${(data.model || '未知模型')} 已连接`;
             console.log('设置状态文本:', statusText);
             modelStatus.textContent = statusText;
         }
@@ -1112,9 +1118,14 @@ async function checkSystemStatus() {
         const modelData = await modelResponse.json();
         console.log('模型信息响应:', modelData);
         
-        if (modelData.model) {
-            const modelName = modelData.model.split('/').pop() || modelData.model;
-            const statusText = `${modelName} 已连接`;
+        if (modelData.model || modelData.core_model || modelData.light_model) {
+            const coreRaw = modelData.core_model || modelData.model || '';
+            const lightRaw = modelData.light_model || modelData.model || '';
+            const coreName = (coreRaw && typeof coreRaw === 'string') ? (coreRaw.split('/').pop() || coreRaw) : '';
+            const lightName = (lightRaw && typeof lightRaw === 'string') ? (lightRaw.split('/').pop() || lightRaw) : '';
+            const statusText = (coreName && lightName)
+                ? `核心: ${coreName} / 轻量: ${lightName} 已连接`
+                : `${(modelData.model || '未知模型')} 已连接`;
             console.log('设置模型状态:', statusText);
             modelStatus.textContent = statusText;
             modelStatus.className = 'text-xs text-green-600 dark:text-green-400';

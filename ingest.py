@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 InsurIntellect Agent - Data Ingestion Pipeline
 =============================================
@@ -34,7 +34,11 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.embeddings import HuggingFaceEmbeddings
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+except Exception:
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+import torch
 try:
     from langchain_core.documents import Document
 except Exception:
@@ -49,9 +53,15 @@ from app.services.document_parser_service import DocumentParserService
 from app.services.llm_service import LLMService
 from app.core.database import init_db, db_manager
 from app.models.database_models import DocumentMetadata
+from app.models.schemas import DocumentMetadata as DocumentMetadataSchema
+from pydantic import ValidationError
 
 # OCR imports
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF
+except Exception:
+    fitz = None  # type: ignore
+    logging.getLogger(__name__).warning("PyMuPDF 未安装，摄取将使用 pdfplumber/PyPDF2 回退与布局解析服务")
 import pytesseract
 from PIL import Image
 from dotenv import load_dotenv
@@ -174,49 +184,115 @@ def _load_ingestion_config() -> Dict[str, Any]:
 
 def get_metadata_from_ai(text_snippet: str) -> Dict[str, Any]:
     """
-    使用AI从文档文本片段中提取结构化元数据
-    
-    Args:
-        text_snippet (str): 文档文本片段
-        
-    Returns:
-        Dict[str, Any]: 包含元数据的字典
+    使用 AI 从文档文本片段中提取结构化元数据（强制 Pydantic 验证）。
+
+    - 提示词包含严格的 JSON 输出要求与 Pydantic JSON Schema。
+    - 解析使用 DocumentMetadataSchema.model_validate_json，移除脆弱的 json.loads。
+    - 失败时捕获 ValidationError，进行一次重试并记录审计日志。
     """
     try:
+        # 使用 LLMService 的轻量模型执行结构化决策（KCP-SWAP-2）
+        import json as _json
+        schema_json = _json.dumps(DocumentMetadataSchema.model_json_schema(), ensure_ascii=False)
+        example_json = _json.dumps(
+            {
+                "document_type": "条款",
+                "product_name": "XX安心保险",
+                "effective_date": "2024-01-01",
+                "document_title": "产品条款说明",
+                "status": "active",
+            },
+            ensure_ascii=False,
+        )
+
+        base_prompt = (
+            DIGITAL_ARCHIVIST_PROMPT.format(document_text_snippet=text_snippet)
+            + "\n\n严格按照以下 JSON Schema 输出，仅返回一个 JSON 对象：\n"
+            + schema_json
+            + "\n\n注意：\n- 只输出 JSON 对象，不要解释、不加代码块、不加多余字段。\n"
+            + "- 如果无法确定日期或产品名，用 null；文档类型务必填入。\n"
+            + "示例（供参考，必须遵循 Schema 键名与类型）：\n"
+            + example_json
+        )
+
+        def _clean_to_json_str(s: str) -> str:
+            s = (s or "").strip()
+            # 去除可能的代码围栏
+            if "```" in s:
+                try:
+                    s = s.split("```", 1)[1]
+                    s = s.replace("json", "", 1)
+                    s = s.split("```", 1)[0]
+                except Exception:
+                    pass
+            # 提取首尾大括号之间的片段
+            l = s.find("{")
+            r = s.rfind("}")
+            if l != -1 and r != -1 and r > l:
+                return s[l : r + 1]
+            return s
+
+        async def _call_llm(messages):
+            llm = LLMService()
+            return await llm.agenerate_structured_decision(messages, temperature=0.0, max_tokens=512)
+
+        # 首次尝试（轻量模型）
+        logger.info("正在调用 LLMService.agenerate_structured_decision 提取文档元数据（结构化）...")
+        messages = [
+            {"role": "system", "content": "你是严谨的档案元数据提取助手，只输出一个满足 Schema 的 JSON。"},
+            {"role": "user", "content": base_prompt},
+        ]
+        resp1 = asyncio.run(_call_llm(messages))
+        content1 = _clean_to_json_str(resp1.choices[0].message.content if resp1 and getattr(resp1, "choices", None) else "")
         try:
-            # 尝试动态导入硅基流动Chat模型；如不可用则回退
-            from langchain_community.chat_models import ChatSiliconFlow  # type: ignore
-            chat_model = ChatSiliconFlow(
-                model=settings.OPENAI_MODEL,  # 使用配置中的模型名
-                api_key=os.getenv("SILICONFLOW_API_KEY"),
-                temperature=settings.OPENAI_TEMPERATURE
-            )
-            prompt = DIGITAL_ARCHIVIST_PROMPT.format(
-                document_text_snippet=text_snippet
-            )
-            logger.info("正在调用AI提取文档元数据..")
-            response = chat_model.invoke(prompt)
-            try:
-                metadata = json.loads(response.content)
-                logger.info(f"成功提取元数据: {metadata}")
-                return metadata
-            except json.JSONDecodeError as e:
-                logger.error(f"AI返回的不是合法的JSON: {e}")
-                return {
-                    "document_title": "解析失败",
-                    "product_name": "未知",
-                    "effective_date": "未知",
-                    "document_type": "未知",
-                    "error": f"JSON解析错误: {str(e)}"
-                }
-        except ImportError:
-            logger.warning("ChatSiliconFlow不可用,使用回退元数据")
+            model1 = DocumentMetadataSchema.model_validate_json(content1)
+            data = model1.model_dump()
+            logger.info(f"成功提取元数据（首次尝试）: {data}")
+            eff = data.get("effective_date")
+            if isinstance(eff, (dict, list)):
+                data["effective_date"] = None
             return {
-                "document_title": "自动生成",
-                "product_name": "未知",
-                "effective_date": "未知",
-                "document_type": "PDF"
+                "document_title": data.get("document_title") or "自动生成",
+                "product_name": data.get("product_name") or "未知",
+                "effective_date": data.get("effective_date") or "未知",
+                "document_type": data.get("document_type") or "未知",
+                "status": data.get("status") or None,
             }
+        except ValidationError as ve:
+            logger.warning(f"Pydantic 验证失败（首次尝试），准备重试：{ve}")
+
+        # 第二次尝试：更严格的格式提醒
+        strict_messages = [
+            {"role": "system", "content": "只输出严格遵循 Schema 的 JSON 对象，不要任何解释或代码围栏。"},
+            {"role": "user", "content": base_prompt},
+        ]
+        resp2 = asyncio.run(_call_llm(strict_messages))
+        content2 = _clean_to_json_str(resp2.choices[0].message.content if resp2 and getattr(resp2, "choices", None) else "")
+        try:
+            model2 = DocumentMetadataSchema.model_validate_json(content2)
+            data = model2.model_dump()
+            logger.info(f"成功提取元数据（第二次尝试）: {data}")
+            eff = data.get("effective_date")
+            if isinstance(eff, (dict, list)):
+                data["effective_date"] = None
+            return {
+                "document_title": data.get("document_title") or "自动生成",
+                "product_name": data.get("product_name") or "未知",
+                "effective_date": data.get("effective_date") or "未知",
+                "document_type": data.get("document_type") or "未知",
+                "status": data.get("status") or None,
+            }
+        except ValidationError as ve2:
+            logger.error(f"Pydantic 验证失败（第二次尝试）：{ve2}")
+
+        # 两次失败后回退
+        return {
+            "document_title": "解析失败",
+            "product_name": "未知",
+            "effective_date": "未知",
+            "document_type": "未知",
+            "error": "AI输出未通过结构化验证",
+        }
     except Exception as e:
         logger.error(f"AI元数据提取失败: {e}")
         return {
@@ -224,7 +300,7 @@ def get_metadata_from_ai(text_snippet: str) -> Dict[str, Any]:
             "product_name": "未知",
             "effective_date": "未知",
             "document_type": "未知",
-            "error": f"AI调用错误: {str(e)}"
+            "error": f"AI调用错误: {str(e)}",
         }
 
 
@@ -312,8 +388,10 @@ def main():
     ocr_pages = 0
     total_files = 0
     
-    def _page_pixmap_to_image(pix: fitz.Pixmap) -> Image.Image:
+    def _page_pixmap_to_image(pix):
         """将 PyMuPDF 的 Pixmap 转为 PIL Image"""
+        if fitz is None:
+            raise RuntimeError("PyMuPDF 未安装，无法将 Pixmap 转为 Image")
         mode = "RGB" if pix.n < 4 else "RGBA"
         img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
         if mode == "RGBA":
@@ -420,6 +498,8 @@ def main():
                 # 取第一块文本作为摘要，用于 AI 元数据提取（跳过表格块）
                 first_text_block = next((d for d in documents if d.page_content and not d.metadata.get("table_json_schema")), None)
                 first_page_text = (first_text_block.page_content if first_text_block else documents[0].page_content)[:2000]
+                import time as _time
+                _time.sleep(0.5)
                 ai_metadata = get_metadata_from_ai(first_page_text)
 
                 # 已由布局服务进行一级边界与二级 token 分割，此处不再使用传统 splitter
@@ -538,8 +618,11 @@ def main():
             # 解析本地模型名称（形式: local:BAAI/bge-m3 或 hf:BAAI/bge-m3）
             local_model = model_name_cfg.split(":", 1)[1] if ":" in model_name_cfg else "BAAI/bge-m3"
             logger.info(f"Embeddings provider: local:huggingface, model={local_model}")
+            _device = "cuda" if torch.cuda.is_available() else "cpu"
             embeddings = HuggingFaceEmbeddings(
                 model_name=local_model,
+                model_kwargs={"device": _device},
+                encode_kwargs={"batch_size": 32},
             )
         else:
             remote_model = model_name_cfg or "BAAI/bge-large-zh-v1.5"
@@ -638,6 +721,8 @@ def main():
             end = min(start + batch_size, total)
             batch_docs = all_documents[start:end]
             logger.info(f"写入批次 {start}-{end},共 {len(batch_docs)} 个文档块")
+            import time as _time
+            _time.sleep(0.5)
             # 在写入前统一清洗元数据，确保所有值为 Chroma 允许的原子类型
             def _sanitize_metadata(md: Dict[str, Any]) -> Dict[str, Any]:
                 out: Dict[str, Any] = {}
@@ -723,6 +808,14 @@ def main():
             logger.info("结构化元数据持久化完成")
         except Exception as e:
             logger.warning(f"结构化元数据持久化失败: {e}")
+
+        # 基于结构化元数据构建并持久化基础知识图谱
+        try:
+            logger.info("开始基于结构化元数据持久化知识图谱实体与关系...")
+            asyncio.run(_persist_kg_from_document_metadata())
+            logger.info("知识图谱持久化完成")
+        except Exception as e:
+            logger.warning(f"知识图谱持久化失败: {e}")
         
         # 验证数据库（如果集合可用）
         try:
@@ -809,5 +902,123 @@ async def _persist_structured_metadata(all_documents):
         logging.getLogger(__name__).info(f"document_metadata 新增 {inserted} 条记录")
     except Exception as e:
         logging.getLogger(__name__).warning(f"结构化元数据写入失败: {e}")
+
+
+async def _persist_kg_from_document_metadata():
+    """基于 document_metadata 建立基础知识图谱并持久化。
+
+    规则：
+    - 为每个 product_name 创建 GraphEntity(type=Product)
+    - 为每个 document_type 创建 GraphEntity(type=DocumentType)
+    - 建立 GraphRelation(type=HAS_DOCUMENT_TYPE)，使用 chunk_id 作为来源标注
+    """
+    try:
+        await init_db()
+        session = await db_manager.create_session()
+
+        from sqlalchemy import select
+        from app.models.database_models import DocumentMetadata, GraphEntity, GraphRelation
+
+        res = await session.execute(
+            select(
+                DocumentMetadata.chunk_id,
+                DocumentMetadata.product_name,
+                DocumentMetadata.document_type,
+            )
+        )
+        rows = res.fetchall()
+
+        async def _normalize_metadata_via_ai(product_name: str | None, document_type: str | None) -> tuple[str | None, str | None]:
+            """使用轻量模型对产品名与文档类型进行规范化/纠错，确保文档类型归一化到有限集合。
+
+            目标集合：{"条款","说明书","费率/利益","通用"}
+            返回 (规范化后的产品名, 规范化后的文档类型)
+            """
+            try:
+                llm = LLMService()
+                schema = json.dumps({
+                    "product_name": {"type": "string", "nullable": True},
+                    "document_type": {"type": "string", "enum": ["条款", "说明书", "费率/利益", "通用"]},
+                }, ensure_ascii=False)
+                prompt = (
+                    "请根据以下输入对产品名进行清洗（可原样返回），并将文档类型标准化到集合{条款, 说明书, 费率/利益, 通用}。只输出一个 JSON 对象。\n"
+                    f"输入：product_name={product_name or ''}, document_type={document_type or ''}\n"
+                    + "严格遵循此 JSON Schema：\n"
+                    + schema
+                )
+                messages = [
+                    {"role": "system", "content": "你是一个规范化助手，只输出一个满足 Schema 的 JSON。"},
+                    {"role": "user", "content": prompt},
+                ]
+                resp = await llm.agenerate_structured_decision(messages, temperature=0.0, max_tokens=64)
+                content = (resp.choices[0].message.content if resp and getattr(resp, "choices", None) else "")
+                try:
+                    data = json.loads(content)
+                except Exception:
+                    # 简单清洗再尝试
+                    content = content.strip().strip("` ")
+                    l = content.find("{")
+                    r = content.rfind("}")
+                    if l != -1 and r != -1 and r > l:
+                        data = json.loads(content[l:r+1])
+                    else:
+                        data = {}
+                pn = data.get("product_name") or product_name
+                dt = data.get("document_type") or (document_type or "通用")
+                if dt not in {"条款", "说明书", "费率/利益", "通用"}:
+                    dt = "通用"
+                return pn, dt
+            except Exception:
+                return product_name, (document_type or "通用")
+
+        async def get_or_create_entity(name: str | None, etype: str):
+            if not name:
+                return None
+            q = select(GraphEntity).where(GraphEntity.name == name, GraphEntity.entity_type == etype)
+            r = await session.execute(q)
+            obj = r.scalar_one_or_none()
+            if obj:
+                return obj
+            obj = GraphEntity(name=name, entity_type=etype)
+            session.add(obj)
+            await session.flush()
+            return obj
+
+        created_relations = 0
+        for chunk_id, product_name, document_type in rows:
+            # 使用轻量模型进行规范化，确保文档类型归一化
+            product_name, document_type = await _normalize_metadata_via_ai(product_name, document_type)
+            if not product_name:
+                continue
+            prod = await get_or_create_entity(product_name, "Product")
+            dtype = await get_or_create_entity(document_type or "Unknown", "DocumentType")
+            if not (prod and dtype):
+                continue
+
+            rel_q = select(GraphRelation).where(
+                GraphRelation.source_entity_id == prod.id,
+                GraphRelation.target_entity_id == dtype.id,
+                GraphRelation.relation_type == "HAS_DOCUMENT_TYPE",
+                GraphRelation.chunk_id == chunk_id,
+            )
+            existed = (await session.execute(rel_q)).scalar_one_or_none()
+            if existed:
+                continue
+
+            rel = GraphRelation(
+                source_entity_id=prod.id,
+                target_entity_id=dtype.id,
+                relation_type="HAS_DOCUMENT_TYPE",
+                chunk_id=chunk_id,
+            )
+            session.add(rel)
+            created_relations += 1
+
+        if created_relations:
+            await session.commit()
+        await db_manager.close_session(session)
+        logging.getLogger(__name__).info(f"KG relations 新增 {created_relations} 条")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"知识图谱持久化失败: {e}")
 
 

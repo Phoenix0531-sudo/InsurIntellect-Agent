@@ -161,8 +161,11 @@ async def get_model_info():
     try:
         from app.core.config import settings
         return {
+            # 兼容旧字段，同时暴露轻量/核心模型
             "model": settings.OPENAI_MODEL,
-            "base_url": settings.OPENAI_BASE_URL,
+            "core_model": getattr(settings, "OPENAI_MODEL_CORE", settings.OPENAI_MODEL),
+            "light_model": getattr(settings, "OPENAI_MODEL_LIGHT", settings.OPENAI_MODEL),
+            "base_url": settings.OPENAI_BASE_URL or getattr(settings, "SILICONFLOW_BASE_URL", None),
             "embedding_model": settings.OPENAI_EMBEDDING_MODEL,
             "status": "connected",
         }

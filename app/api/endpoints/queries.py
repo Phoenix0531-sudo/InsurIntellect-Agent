@@ -21,6 +21,9 @@ from app.services.query_service import QueryService
 logger = get_logger(__name__)
 router = APIRouter()
 
+# 模块级单例：避免每次请求都重新初始化 Agent 等重资源
+query_service = QueryService()
+
 
 @router.get("/test")
 async def test_endpoint():
@@ -51,8 +54,6 @@ async def ask_question(
             raise HTTPException(status_code=400, detail="问题不能为空")
         if len(query_request.question) > 1000:
             raise HTTPException(status_code=400, detail="问题长度不能超过1000个字符")
-
-        query_service = QueryService()
 
         # 统一：优先使用请求体中的 stream 字段；若为空回退 querystring
         use_stream = (
@@ -97,7 +98,6 @@ async def get_query_history(
     支持分页、类型过滤和时间范围过滤
     """
     try:
-        query_service = QueryService()
         history = await query_service.get_query_history(
             db=db,
             skip=skip,
@@ -253,7 +253,6 @@ async def submit_feedback(
 ):
     """为查询结果提交反馈"""
     try:
-        query_service = QueryService()
         success = await query_service.update_query_feedback(
             db=db,
             query_id=query_id,
@@ -283,7 +282,6 @@ async def get_query_statistics(
     包括查询数量、平均响应时间、用户满意度
     """
     try:
-        query_service = QueryService()
         stats = await query_service.get_query_statistics(db=db, days=days)
         return stats
     except Exception as e:
@@ -316,7 +314,6 @@ async def batch_query(
             if len(question) > 1000:
                 raise HTTPException(status_code=400, detail=f"第{i+1}个问题长度不能超过1000个字符")
 
-        query_service = QueryService()
         responses: List[QueryResponse] = []
 
         # 逐个处理查询

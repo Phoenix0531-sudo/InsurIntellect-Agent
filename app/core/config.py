@@ -26,10 +26,14 @@ class Settings(BaseSettings):
     # OpenAI配置 (现在使用硅基流动)
     OPENAI_API_KEY: str = Field(default="", description="OpenAI API密钥")
     OPENAI_BASE_URL: str = Field(default="https://api.siliconflow.cn/v1", description="OpenAI API基础URL")
-    OPENAI_MODEL: str = Field(default="Qwen/Qwen2.5-7B-Instruct", description="OpenAI模型")
+    OPENAI_MODEL: str = Field(default="Qwen/Qwen2.5-7B-Instruct", description="OpenAI模型（兼容旧字段）")
+    # 双模型配置：轻量/核心（用于分类/重写 与 生成 分工）
+    OPENAI_MODEL_LIGHT: str = Field(default="Qwen/Qwen2.5-7B-Instruct", description="轻量任务模型（意图/重写/路由）")
+    OPENAI_MODEL_CORE: str = Field(default="Qwen/Qwen2.5-7B-Instruct", description="核心生成模型（答案生成/摘要/SQL总结）")
     OPENAI_EMBEDDING_MODEL: str = Field(default="hf:models/finetuned_embedding_v1", description="嵌入模型")
     OPENAI_MAX_TOKENS: int = Field(default=1000, description="最大令牌数")
     OPENAI_TEMPERATURE: float = Field(default=0.7, description="温度参数")
+    OPENAI_TIMEOUT_SECS: int = Field(default=60, description="LLM客户端超时（秒）")
     
     # 硅基流动配置
     SILICONFLOW_API_KEY: str = Field(default="", description="硅基流动API密钥")
@@ -65,9 +69,15 @@ class Settings(BaseSettings):
     MAX_RETRIEVED_CHUNKS: int = Field(default=8, description="最大检索块数")
     SIMILARITY_THRESHOLD: float = Field(default=0.35, description="相似度阈值")
 
-    # 查询重写配置（攻关任务二）
+    # 查询重写与路由配置
     ENABLE_QUERY_REWRITING: bool = Field(default=False, description="启用口语化查询意图转换引擎")
+    ENABLE_QUERY_ROUTING: bool = Field(default=False, description="启用基于 LLM 的 RAG/SQL 路由（关闭则默认走 RAG）")
     ONTOLOGY_JSON_PATH: str = Field(default="tools/insurance_ontology.json", description="保险术语本体库JSON路径")
+
+    # 时序与降级超时（提升并发稳定性）
+    CONTEXT_BUILD_TIMEOUT_SECS: int = Field(default=3, description="检索上下文构建最大等待秒数")
+    LLM_ANSWER_TIMEOUT_SECS: int = Field(default=8, description="非流式回答最大等待秒数，超时将返回降级提示")
+    LLM_QUEUE_TIMEOUT_SECS: float = Field(default=0.75, description="等待全局并发队列信号量的最大秒数，超时则快速降级")
     
     # 安全配置
     SECRET_KEY: str = Field(default="your-secret-key-here", description="密钥")
@@ -115,6 +125,8 @@ class Settings(BaseSettings):
     LLM_BACKOFF_MAX: float = Field(default=2.5, description="LLM 最大退避秒")
     LLM_CIRCUIT_FAILURE_THRESHOLD: int = Field(default=10, description="LLM 熔断失败阈值")
     LLM_CIRCUIT_RESET_TIMEOUT: int = Field(default=30, description="LLM 熔断冷却秒")
+    # 计费与用量限制（基础）
+    LLM_DAILY_TOKENS_LIMIT: int = Field(default=0, description="每日令牌上限（0表示不限制，需结合外部监控）")
     # ChromaDB 同步调用线程池大小（用于 asyncio.run_in_executor 包装）
     CHROMA_THREAD_MAX_WORKERS: int = Field(default=32, description="ChromaDB 同步调用线程池大小")
     # 异步数据库URL（postgresql+asyncpg）
@@ -130,6 +142,15 @@ class Settings(BaseSettings):
         super().__init__(**kwargs)
         # 确保必要的目录存在
         self._create_directories()
+        # 兼容处理：若未显式设置 CORE/ LIGHT，则回退到 OPENAI_MODEL
+        try:
+            if (self.OPENAI_MODEL_CORE or "").strip() == "":
+                self.OPENAI_MODEL_CORE = self.OPENAI_MODEL
+            if (self.OPENAI_MODEL_LIGHT or "").strip() == "":
+                self.OPENAI_MODEL_LIGHT = self.OPENAI_MODEL
+        except Exception:
+            # 保守：无需中断初始化
+            pass
     
     def _create_directories(self):
         """创建必要的目录"""

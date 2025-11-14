@@ -59,7 +59,7 @@ class QueryRouterService:
                 {"role": "system", "content": ROUTER_PROMPT},
                 {"role": "user", "content": f"用户查询：{query}\n仅输出JSON对象。"},
             ]
-            resp = await self.llm._chat_completion(messages, temperature=0.0, max_tokens=256)
+            resp = await self.llm.agenerate_structured_decision(messages, temperature=0.0, max_tokens=256)
             content = resp.choices[0].message.content if resp and resp.choices else ""
             content = self._clean_json_str(content)
             parsed = json.loads(content)

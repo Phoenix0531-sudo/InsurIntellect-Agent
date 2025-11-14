@@ -20,9 +20,13 @@ except Exception:  # 运行时可选依赖
     OpenAIEmbeddings = None  # type: ignore
 
 try:
-    from langchain_community.embeddings import HuggingFaceEmbeddings
+    from langchain_huggingface import HuggingFaceEmbeddings
 except Exception:
-    HuggingFaceEmbeddings = None  # type: ignore
+    try:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+    except Exception:
+        HuggingFaceEmbeddings = None  # type: ignore
+import torch
 
 
 logger = get_logger(__name__)
@@ -42,7 +46,12 @@ class EmbeddingService:
                 raise RuntimeError("HuggingFaceEmbeddings 未安装或不可用")
             local_model = self.model_name.split(":", 1)[1] if ":" in self.model_name else self.model_name
             logger.info(f"初始化本地 HuggingFaceEmbeddings: model={local_model}")
-            self._embedding = HuggingFaceEmbeddings(model_name=local_model)
+            _device = "cuda" if torch.cuda.is_available() else "cpu"
+            self._embedding = HuggingFaceEmbeddings(
+                model_name=local_model,
+                model_kwargs={"device": _device},
+                encode_kwargs={"batch_size": 32},
+            )
             self.provider = "huggingface"
         else:
             if OpenAIEmbeddings is None:
