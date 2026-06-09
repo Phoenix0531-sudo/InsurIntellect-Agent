@@ -1,0 +1,4 @@
+# Optional dependencies — only needed for specific features
+#
+# pinecone:  Pinecone vector database integration (alternative to ChromaDB)
+#   pip install pinecone-client
