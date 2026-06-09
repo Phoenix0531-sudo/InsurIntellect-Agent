@@ -1,37 +1,38 @@
-# InsurIntellect Agent
+# ZDEM Archiver
 
 <div align="center">
 
-Intelligent insurance document Q&A system powered by LLM and vector retrieval.
+Data purge utility for ZDEM numerical simulations.
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.104%2B-green)
-![LangChain](https://img.shields.io/badge/LangChain-0.2%2B-blue)
+![PyQt5](https://img.shields.io/badge/PyQt-5.15-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 </div>
 
 ## Overview
 
-An intelligent Q&A system for insurance documents. Uses RAG (Retrieval-Augmented Generation) to transform unstructured insurance documents into an interactive knowledge base with semantic search, multi-turn conversation, and streaming output.
+A native GUI purging utility for ZDEM discrete element method simulations. Safely strips redundant output data while preserving core source code and configuration files.
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
-python -m app
+python zdem_archiver_main.py
 ```
 
 ## Docker
 
 ```bash
-docker build -t insurintellect .
-docker run --rm insurintellect
+docker build -t zdem-archiver .
+docker run --rm zdem-archiver
 ```
+
+*Docker is for build verification only; GUI requires a native display.*
 
 ## Repository
 
-<https://github.com/Phoenix0531-sudo/InsurIntellect-Agent>
+<https://github.com/Phoenix0531-sudo/ZDEM_Archiver>
 
 ## License
 
