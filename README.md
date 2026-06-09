@@ -387,6 +387,23 @@ pip install -r requirements.txt
 
 ---
 
+## Docker 使用 | Docker Usage
+
+本项目为 FastAPI Web 服务，完全适合 Docker 部署。
+
+```bash
+# 构建镜像
+docker build -t insurintellect-agent .
+
+# 验证导入
+docker run --rm insurintellect-agent
+
+# 启动服务
+docker run -p 8000:8000 insurintellect-agent uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+---
+
 ## 项目结构 | Project Structure
 
 项目目录结构如下：
