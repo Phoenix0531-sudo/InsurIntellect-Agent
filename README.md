@@ -395,12 +395,11 @@ pip install -r requirements.txt
 # 构建镜像
 docker build -t insurintellect-agent .
 
-# 验证导入
-docker run --rm insurintellect-agent
-
 # 启动服务
-docker run -p 8000:8000 insurintellect-agent uvicorn app.main:app --host 0.0.0.0 --port 8000
+docker run -p 8000:8000 insurintellect-agent
 ```
+
+启动后访问 http://localhost:8000。通过 `docker run --rm insurintellect-agent python -c "from app.main import app; print(app.title)"` 可快速验证导入。
 
 ---
 
