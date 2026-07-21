@@ -2,6 +2,12 @@
 
 # InsurIntellect Agent · 保险智能问答系统
 
+**Insurance document Q&A system powered by LLM and vector retrieval**
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+![CI](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml/badge.svg)
+
 **Intelligent Insurance Document Q&A System Powered by LLM and Vector Retrieval**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
