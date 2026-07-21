@@ -463,3 +463,7 @@ InsurIntellect_Agent/
 > This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 <div align="center">**Made for the insurance intelligence community**</div>
+
+## License
+
+[MIT](LICENSE) — free for commercial use with attribution.
