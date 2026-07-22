@@ -536,7 +536,7 @@ class QueryService:
                 # 在构建上下文前调用路由器（R4.2 - 流式路径），受开关控制
                 route_result = {"route": "RAG"}
                 if settings.ENABLE_QUERY_ROUTING:
-                    router = QueryRouterService(llm_service=llm)
+                    router = QueryRouterService(llm_service=llm_light)
                     try:
                         route_result = await router.route_query(request.question)
                     except Exception as re:
@@ -569,7 +569,7 @@ class QueryService:
                     except Exception:
                         results_text = str(sql_rows)
                     sql_context = [{"document_name": "SQL结果", "page_number": "N/A", "content": f"SQL: {sql_query}\n结果: {results_text}"}]
-                    gen_res = await llm.agenerate_response(query=request.question, context_chunks=sql_context)
+                    gen_res = await llm_core.agenerate_response(query=request.question, context_chunks=sql_context)
                     final_text = gen_res.get("answer", "")
 
                     # 保存历史
@@ -822,7 +822,7 @@ class QueryService:
                 final_text = ""
                 tokens_used = 0
                 response_time = 0.0
-                async for ev in llm.stream_answer(request.question, retrieved_chunks):
+                async for ev in llm_core.stream_answer(request.question, retrieved_chunks):
                     etype = ev.get("type")
                     if etype == "token":
                         final_text += ev.get("content", "")

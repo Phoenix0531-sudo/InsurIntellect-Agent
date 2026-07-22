@@ -53,7 +53,7 @@ jobs:
           test -f README.md
           test -f LICENSE || test -f LICENSE.md
 
-      - name: Ruff (non-blocking)
+      - name: Ruff (hard — critical rules)
         run: ruff check . --select E9,F63,F7,F82
 
       - name: Pytest (hard, tests/ only)
