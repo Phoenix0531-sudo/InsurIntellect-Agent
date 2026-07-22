@@ -1,86 +1,51 @@
 # InsurIntellect Agent
 
-**保险文档智能问答：LLM + 向量检索**
+**保险文档智能问答：LLM + 向量检索（FastAPI）**
 
 [English](README.md) | [中文](README.zh-CN.md)
 
 ![CI](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 
-保险文档智能问答：LLM + 向量检索。
+面向**保险**材料的文档问答栈：将 PDF / 文本入库向量库，用 LLM + 检索作答，`app/` 下 FastAPI 服务。
 
-> 作者：[Phoenix0531-sudo](https://github.com/Phoenix0531-sudo) · 欢迎学习、二次开发与**商业使用**，请保留本仓库署名与许可证声明。
+> 演示 / 研究助手——非受监管保险建议。
 
-## 技术栈
+## 为什么做这个
 
-Python · LLM · RAG
+保单 PDF 又长又术语密集。RAG Agent 是「LLM + 领域文档」的作品集切片，不宣称承保系统。
 
-## 功能特性
+## 功能
 
-- 文档摄取与向量库
-- 保险场景问答
-- 监控与报告脚本
+- `ingest.py` 入库入口  
+- `app/` FastAPI（API / services / prompts）  
+- 可选依赖 `requirements-optional.txt`  
+- monitoring / reports 运行产物  
 
-## 快速开始
+## 安装
 
 ```bash
 git clone https://github.com/Phoenix0531-sudo/InsurIntellect-Agent.git
 cd InsurIntellect-Agent
-```
-
-```bash
 pip install -r requirements.txt
-python ingest.py
-# 启动 app 服务见 app/
 ```
 
-更完整的英文说明见 [README.md](README.md)。
-
-## 仓库结构（摘要）
-
-```
-InsurIntellect-Agent/
-├─ .github/
-├─ app/
-├─ data/
-├─ docs/
-├─ logs/
-├─ monitoring/
-├─ reports/
-├─ scripts/
-├─ static/
-├─ tools/
-├─ CHANGELOG.md
-├─ Dockerfile
-├─ ingest.py
-├─ LICENSE
-├─ README.md
-├─ README.zh-CN.md
-├─ requirements-optional.txt
-├─ requirements.txt
-```
-
-## 测试
+## 使用
 
 ```bash
-pip install pytest
-pytest -q
+python ingest.py --help
+uvicorn app.main:app --reload
 ```
 
-仓库内 `tests/` 至少包含 smoke 测试；有完整测试套件时以 CI 为准。
+## 目录结构
 
-## CI
-
-GitHub Actions（`push` / `pull_request`）会：
-
-- 安装依赖（requirements / pyproject）
-- 运行 `pytest`（**硬失败**）
-- 尽力做语法/结构检查
+```
+app/
+ingest.py
+data/ logs/ reports/
+tests/
+```
 
 ## 许可证
 
-[MIT](LICENSE) — 可自由使用、修改、分发与**商用**，需保留版权与许可声明（提及本仓库 / 作者即可）。
-
-## 关于
-
-维护者：[Phoenix0531-sudo](https://github.com/Phoenix0531-sudo)
+MIT。可在署名前提下商用。见 [LICENSE](LICENSE)。
