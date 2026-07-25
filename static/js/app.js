@@ -1,4 +1,6 @@
-/* InsurIntellect clause RAG UI — document-evidence workspace (single main path) */
+/* InsurIntellect UI — wired to clause RAG APIs.
+ * Structure mirrors chat-pdf / chatpdf-yt / AnythingLLM patterns in static HTML/CSS.
+ */
 (function () {
   const thread = document.getElementById("thread");
   const emptyState = document.getElementById("emptyState");
@@ -7,6 +9,7 @@
   const sendButton = document.getElementById("sendButton");
   const streamToggle = document.getElementById("streamToggle");
   const clearBtn = document.getElementById("clearBtn");
+  const resetBtn = document.getElementById("resetBtn");
   const docList = document.getElementById("docList");
   const corpusCount = document.getElementById("corpusCount");
   const healthDot = document.getElementById("healthDot");
@@ -15,6 +18,7 @@
   let busy = false;
   let abortController = null;
   let emptyHTML = emptyState ? emptyState.outerHTML : "";
+  let activeDoc = null;
 
   function escapeHtml(s) {
     return String(s ?? "")
@@ -28,6 +32,7 @@
     busy = v;
     sendButton.disabled = v;
     input.disabled = v;
+    if (resetBtn) resetBtn.disabled = false;
   }
 
   function hideEmpty() {
@@ -42,10 +47,9 @@
 
   function autoGrow() {
     input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 140) + "px";
+    input.style.height = Math.min(Math.max(input.scrollHeight, 100), 180) + "px";
   }
 
-  /** Format answer: section headers + [n] cite chips (Perplexity rhythm) */
   function formatAnswerHtml(text) {
     const raw = String(text ?? "");
     const escaped = escapeHtml(raw);
@@ -53,15 +57,10 @@
       .replace(
         /^(【[^】]+】|[一二三四五六七八九十]+[、.．]|结论|条款依据|不确定[/／]?边界)([^\n]*)/gm,
         function (_m, head, rest) {
-          return (
-            '<span class="sec-head">' +
-            head +
-            (rest || "") +
-            "</span>"
-          );
+          return '<span class="sec-head">' + head + (rest || "") + "</span>";
         }
       )
-      .replace(/\[(\d+)\]/g, '<span class="cite-ref">[$1]</span>');
+      .replace(/\[(\d+)\]/g, '<a class="cite-ref" href="#cite-$1">[$1]</a>');
   }
 
   function createCitationsHtml(sources) {
@@ -69,7 +68,7 @@
       return (
         '<div class="citations">' +
         '<div class="citations-head">' +
-        '<span class="citations-title">来源</span>' +
+        '<span class="citations-title">Sources</span>' +
         '<span class="citations-note">0</span>' +
         "</div>" +
         '<div class="cite-grid">' +
@@ -77,6 +76,19 @@
         "</div></div>"
       );
     }
+
+    const pills = sources
+      .slice(0, 3)
+      .map(function (_s, i) {
+        return (
+          '<span class="cite-pill-dot" title="source ' +
+          (i + 1) +
+          '">' +
+          (i + 1) +
+          "</span>"
+        );
+      })
+      .join("");
 
     const cards = sources
       .map(function (s, i) {
@@ -102,7 +114,7 @@
           escapeHtml(name) +
           "</span>" +
           '<span class="cite-page">p.' +
-          escapeHtml(page) +
+          escapeHtml(String(page)) +
           "</span>" +
           "</div>" +
           '<div class="cite-excerpt">' +
@@ -117,10 +129,16 @@
     return (
       '<div class="citations">' +
       '<div class="citations-head">' +
-      '<span class="citations-title">来源</span>' +
+      '<span class="citations-title">Sources</span>' +
       '<span class="citations-note">' +
       sources.length +
-      " chunks</span>" +
+      "</span>" +
+      '<div class="cite-pills">' +
+      pills +
+      (sources.length > 3
+        ? '<span class="citations-note">+ ' + (sources.length - 3) + "</span>"
+        : "") +
+      "</div>" +
       "</div>" +
       '<div class="cite-grid">' +
       cards +
@@ -128,56 +146,42 @@
     );
   }
 
+  function appendMessage(role, contentHtml, extraClass) {
+    hideEmpty();
+    const row = document.createElement("div");
+    row.className =
+      "msg-row is-" + role + (extraClass ? " " + extraClass : "");
+    const avatar = role === "user" ? "●" : "✦";
+    row.innerHTML =
+      '<div class="msg-inner">' +
+      '<div class="msg-avatar" aria-hidden="true">' +
+      avatar +
+      "</div>" +
+      '<div class="msg-body">' +
+      contentHtml +
+      "</div>" +
+      "</div>";
+    thread.appendChild(row);
+    thread.scrollTop = thread.scrollHeight;
+    return row;
+  }
+
+  function setAssistantContent(row, answerHtml, sources) {
+    const body = row.querySelector(".msg-body");
+    if (!body) return;
+    body.innerHTML = answerHtml + createCitationsHtml(sources || []);
+    row.classList.remove("is-pending");
+    thread.scrollTop = thread.scrollHeight;
+  }
+
   function normalizeSources(data) {
     if (!data) return [];
-    if (Array.isArray(data.retrieved_chunks)) return data.retrieved_chunks;
-    if (Array.isArray(data.sources)) return data.sources;
-    return [];
-  }
-
-  function addTurn(question, answer, sources, opts) {
-    hideEmpty();
-    opts = opts || {};
-    const el = document.createElement("article");
-    el.className =
-      "turn" +
-      (opts.pending ? " is-pending" : "") +
-      (opts.error ? " is-error" : "");
-    el.innerHTML =
-      '<div class="q-block">' +
-      '<div class="turn-label">问</div>' +
-      '<div class="q-text">' +
-      escapeHtml(question) +
-      "</div>" +
-      "</div>" +
-      '<div class="a-block">' +
-      '<div class="turn-label">答</div>' +
-      "<div>" +
-      '<div class="a-text">' +
-      (opts.pending
-        ? escapeHtml(answer || "检索中…")
-        : formatAnswerHtml(answer || "")) +
-      "</div>" +
-      (opts.pending ? "" : createCitationsHtml(sources)) +
-      "</div></div>";
-    thread.appendChild(el);
-    thread.scrollTop = thread.scrollHeight;
-    return el;
-  }
-
-  function finalizeTurn(el, answer, sources, isError) {
-    el.classList.remove("is-pending");
-    if (isError) el.classList.add("is-error");
-    const aText = el.querySelector(".a-text");
-    if (aText) {
-      if (isError) aText.textContent = answer || "请求失败";
-      else aText.innerHTML = formatAnswerHtml(answer || "(空回答)");
+    if (Array.isArray(data.retrieved_chunks) && data.retrieved_chunks.length) {
+      return data.retrieved_chunks;
     }
-    const old = el.querySelector(".citations");
-    if (old) old.remove();
-    const host = el.querySelector(".a-block > div:last-child");
-    if (host) host.insertAdjacentHTML("beforeend", createCitationsHtml(sources || []));
-    thread.scrollTop = thread.scrollHeight;
+    if (Array.isArray(data.sources)) return data.sources;
+    if (Array.isArray(data.citations)) return data.citations;
+    return [];
   }
 
   async function loadCorpus() {
@@ -185,207 +189,267 @@
       const res = await fetch("/api/v1/corpus");
       if (!res.ok) throw new Error("corpus " + res.status);
       const data = await res.json();
-      const docs = data.documents || [];
+      const docs = data.documents || data.items || data.docs || [];
+      const totalChunks = data.total_chunks ?? data.chunk_count ?? null;
+      corpusCount.textContent =
+        docs.length +
+        " docs" +
+        (totalChunks != null ? " · " + totalChunks + " chunks" : "");
+
       if (!docs.length) {
         docList.innerHTML =
-          '<div class="source-empty">暂无来源。请运行 generate_sample_corpus.py 与 simple_ingest.py</div>';
-        corpusCount.textContent = "0";
+          '<div class="doc-empty">暂无已索引文档。请运行 sample corpus + ingest。</div>';
         return;
       }
+
       docList.innerHTML = docs
-        .map(function (d) {
-          const name = d.name || d.filename || "document";
-          const pages = d.pages != null ? d.pages + " p" : "PDF";
+        .map(function (d, idx) {
+          const name =
+            d.name || d.document_name || d.filename || d.title || "document";
+          const chunks = d.chunk_count ?? d.chunks ?? d.n_chunks ?? "—";
+          const id = d.id || d.document_id || name;
+          const active = activeDoc === id || (activeDoc == null && idx === 0);
+          if (activeDoc == null && idx === 0) activeDoc = id;
           return (
-            '<div class="source-item" role="listitem" title="' +
+            '<button type="button" class="doc-item' +
+            (active ? " is-active" : "") +
+            '" data-id="' +
+            escapeHtml(String(id)) +
+            '" role="listitem">' +
+            '<span class="doc-item-icon">PDF</span>' +
+            '<span class="doc-item-body">' +
+            '<span class="doc-item-name">' +
             escapeHtml(name) +
-            '">' +
-            '<div class="source-icon">PDF</div>' +
-            '<div class="source-body">' +
-            '<div class="source-name">' +
-            escapeHtml(name) +
-            "</div>" +
-            '<div class="source-meta">' +
-            escapeHtml(pages) +
-            "</div>" +
-            "</div></div>"
+            "</span>" +
+            '<span class="doc-item-meta">' +
+            escapeHtml(String(chunks)) +
+            " chunks</span>" +
+            "</span></button>"
           );
         })
         .join("");
-      corpusCount.textContent =
-        docs.length + " · " + (data.chunk_count || 0) + " chunks";
-    } catch (e) {
+
+      docList.querySelectorAll(".doc-item").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          activeDoc = btn.getAttribute("data-id");
+          docList.querySelectorAll(".doc-item").forEach(function (el) {
+            el.classList.toggle("is-active", el === btn);
+          });
+        });
+      });
+    } catch (err) {
       docList.innerHTML =
-        '<div class="source-empty">无法加载来源（' +
-        escapeHtml(e.message || e) +
-        "）</div>";
-      corpusCount.textContent = "err";
+        '<div class="doc-empty">无法加载语料：' +
+        escapeHtml(err.message || String(err)) +
+        "</div>";
+      corpusCount.textContent = "error";
     }
   }
 
   async function loadHealth() {
     try {
       const res = await fetch("/api/v1/health/");
+      if (!res.ok) throw new Error("health " + res.status);
       const data = await res.json();
-      const ok = data.status === "healthy";
-      healthText.textContent = ok ? "healthy" : data.status || "degraded";
-      healthDot.className = "dot " + (ok ? "ok" : "bad");
-    } catch (_e) {
-      healthText.textContent = "offline";
-      healthDot.className = "dot bad";
-    }
-  }
-
-  async function ask(question) {
-    const q = (question || "").trim();
-    if (!q || busy) return;
-    input.value = "";
-    autoGrow();
-    setBusy(true);
-
-    const useStream = !!(streamToggle && streamToggle.checked);
-    const turn = addTurn(q, "检索中…", [], { pending: true });
-
-    try {
-      if (useStream) {
-        await askStream(q, turn);
+      const status = (data.status || data.overall || "ok").toLowerCase();
+      healthDot.classList.remove("ok", "warn", "err");
+      if (status === "ok" || status === "healthy" || status === "up") {
+        healthDot.classList.add("ok");
+        healthText.textContent = "healthy";
+      } else if (status === "degraded" || status === "warn") {
+        healthDot.classList.add("warn");
+        healthText.textContent = status;
       } else {
-        await askOnce(q, turn);
+        healthDot.classList.add("err");
+        healthText.textContent = status;
       }
-    } catch (e) {
-      finalizeTurn(turn, "请求失败：" + (e.message || e), [], true);
-    } finally {
-      setBusy(false);
+      const llm = data.llm_status || (data.components && data.components.llm);
+      if (llm && /unavail|down|error|missing/i.test(String(llm))) {
+        healthDot.classList.remove("ok");
+        healthDot.classList.add("warn");
+        healthText.textContent = "llm " + llm;
+      }
+    } catch (err) {
+      healthDot.classList.add("err");
+      healthText.textContent = "offline";
     }
   }
 
-  async function askOnce(question, turn) {
+  async function askOnce(question) {
     const res = await fetch("/api/v1/queries/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question: question,
-        stream: false,
-        show_sources: true,
-        query_type: "general",
-      }),
+      body: JSON.stringify({ question: question, stream: false, show_sources: true }),
+      signal: abortController ? abortController.signal : undefined,
+    });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok && !data.answer) {
+      throw new Error(data.detail || data.message || "ask failed " + res.status);
+    }
+    return data;
+  }
+
+  async function askStream(question, onDelta, onFinal) {
+    const res = await fetch("/api/v1/queries/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: question, stream: true, show_sources: true }),
+      signal: abortController ? abortController.signal : undefined,
     });
     if (!res.ok) {
-      const t = await res.text();
-      throw new Error(res.status + " " + t.slice(0, 200));
+      const errData = await res.json().catch(function () {
+        return {};
+      });
+      throw new Error(errData.detail || errData.message || "stream failed " + res.status);
     }
-    const data = await res.json();
-    finalizeTurn(turn, data.answer || "(空回答)", normalizeSources(data), false);
-  }
-
-  async function askStream(question, turn) {
-    abortController = new AbortController();
-    const res = await fetch("/api/v1/queries/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question: question,
-        stream: true,
-        show_sources: true,
-        query_type: "general",
-      }),
-      signal: abortController.signal,
-    });
-    if (!res.ok || !res.body) {
-      return askOnce(question, turn);
+    if (!res.body || !res.body.getReader) {
+      const data = await res.json();
+      onFinal(data);
+      return;
     }
 
-    const aText = turn.querySelector(".a-text");
-    turn.classList.remove("is-pending");
-    let buffer = "";
-    let sources = [];
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let pending = "";
-    let dataLines = [];
-
-    const flushEvent = function () {
-      const raw = dataLines.join("\n");
-      dataLines = [];
-      if (!raw) return;
-      try {
-        const payload = JSON.parse(raw);
-        if (payload.type === "token" || payload.text) {
-          buffer += payload.text || payload.token || "";
-          if (aText) aText.textContent = buffer;
-        }
-        if (payload.type === "context" || payload.retrieved_chunks) {
-          sources = normalizeSources(payload);
-        }
-        if (payload.type === "final" || payload.answer) {
-          if (payload.answer) {
-            buffer = payload.answer;
-            if (aText) aText.textContent = buffer;
-          }
-          const n = normalizeSources(payload);
-          if (n.length) sources = n;
-        }
-      } catch (_e) {
-        buffer += raw;
-        if (aText) aText.textContent = buffer;
-      }
-      thread.scrollTop = thread.scrollHeight;
-    };
+    let buffer = "";
+    let full = "";
+    let finalPayload = null;
 
     while (true) {
-      const result = await reader.read();
-      if (result.done) break;
-      pending += decoder.decode(result.value, { stream: true });
-      const lines = pending.split(/\r?\n/);
-      pending = lines.pop();
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.startsWith("data:")) {
-          dataLines.push(line.slice(5).trim());
-        } else if (line === "") {
-          flushEvent();
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n");
+      buffer = parts.pop() || "";
+      for (let i = 0; i < parts.length; i++) {
+        const line = parts[i].trim();
+        if (!line) continue;
+        let payload = line;
+        if (payload.startsWith("data:")) payload = payload.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        try {
+          const obj = JSON.parse(payload);
+          if (obj.type === "token" || obj.delta || obj.token) {
+            const t = obj.token || obj.delta || obj.content || "";
+            full += t;
+            onDelta(full);
+          } else if (obj.type === "final" || obj.answer || obj.retrieved_chunks) {
+            finalPayload = obj.data || obj;
+            if (obj.answer) finalPayload = obj;
+          } else if (obj.answer) {
+            finalPayload = obj;
+          }
+        } catch (_e) {
+          full += payload;
+          onDelta(full);
         }
       }
     }
-    if (dataLines.length) flushEvent();
 
-    finalizeTurn(
-      turn,
-      buffer || "(流式无内容，可关闭流式重试)",
-      sources,
-      false
+    if (finalPayload) {
+      onFinal(finalPayload);
+    } else {
+      onFinal({ answer: full, retrieved_chunks: [] });
+    }
+  }
+
+  async function handleAsk(question) {
+    const q = String(question || "").trim();
+    if (!q || busy) return;
+
+    setBusy(true);
+    abortController = new AbortController();
+    appendMessage("user", escapeHtml(q));
+    const assistantRow = appendMessage(
+      "assistant",
+      "正在检索条款并生成带引用答案…",
+      "is-pending"
     );
+
+    try {
+      if (streamToggle && streamToggle.checked) {
+        await askStream(
+          q,
+          function (partial) {
+            setAssistantContent(assistantRow, formatAnswerHtml(partial), []);
+            assistantRow.classList.add("is-pending");
+          },
+          function (data) {
+            const answer = data.answer || data.response || "";
+            setAssistantContent(
+              assistantRow,
+              formatAnswerHtml(answer),
+              normalizeSources(data)
+            );
+          }
+        );
+      } else {
+        const data = await askOnce(q);
+        const answer = data.answer || data.response || "(空响应)";
+        setAssistantContent(
+          assistantRow,
+          formatAnswerHtml(answer),
+          normalizeSources(data)
+        );
+      }
+    } catch (err) {
+      if (err.name === "AbortError") {
+        setAssistantContent(assistantRow, "已取消。", []);
+      } else {
+        setAssistantContent(
+          assistantRow,
+          '<span style="color:#991b1b">请求失败：' +
+            escapeHtml(err.message || String(err)) +
+            "</span>",
+          []
+        );
+      }
+    } finally {
+      setBusy(false);
+      abortController = null;
+      input.value = "";
+      autoGrow();
+      input.focus();
+    }
   }
 
   function bindPromptCards() {
     document.querySelectorAll(".prompt-card").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        ask(btn.dataset.q || btn.textContent);
+        const q = btn.getAttribute("data-q") || btn.textContent;
+        handleAsk(q);
       });
     });
   }
 
   form.addEventListener("submit", function (e) {
     e.preventDefault();
-    ask(input.value);
+    handleAsk(input.value);
   });
-
-  if (clearBtn) {
-    clearBtn.addEventListener("click", function () {
-      if (busy) return;
-      showEmpty();
-    });
-  }
 
   input.addEventListener("input", autoGrow);
   input.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      ask(input.value);
+      handleAsk(input.value);
     }
   });
+
+  function resetChat() {
+    if (abortController) abortController.abort();
+    setBusy(false);
+    showEmpty();
+    input.value = "";
+    autoGrow();
+    input.focus();
+  }
+
+  if (clearBtn) clearBtn.addEventListener("click", resetChat);
+  if (resetBtn) resetBtn.addEventListener("click", resetChat);
 
   bindPromptCards();
   loadCorpus();
   loadHealth();
+  autoGrow();
 })();
