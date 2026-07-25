@@ -92,10 +92,14 @@ logs/
 # Docker
 .dockerignore
 
-# 模型文件（本地存储）
-models/
+# 模型权重（本地存储；勿忽略 app/models Python 包）
+/models/
+models/*.bin
+models/*.safetensors
 *.bin
 *.safetensors
+!app/models/
+!app/models/**
 
 # 备份文件
 *.bak

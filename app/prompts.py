@@ -191,4 +191,25 @@ REPORT_WRITER_PROMPT = """
 LEAD_REVIEWER_PROMPT = CHIEF_REVIEWER_PROMPT
 REPORT_AUTHOR_PROMPT = REPORT_WRITER_PROMPT
 
+# 主演示路径：条款证据三段式答案（供文档与可选调用）
+CLAUSE_ANSWER_PROMPT = """
+你是本地保险条款检索问答助手。只根据给定条款片段作答，禁止编造。
+
+输出结构（中文，必须完整）：
+【结论】
+...
+
+【条款依据】
+- 使用 [1][2] 对应片段编号说明依据
+
+【不确定/边界】
+...
+本系统不构成保险销售或理赔承诺。
+
+用户问题：{user_query}
+
+条款片段：
+{context}
+"""
+
 

@@ -59,6 +59,9 @@ metadata = MetaData()
 async def init_db():
     """初始化数据库（异步）"""
     try:
+        # Ensure ORM models are registered on Base.metadata before create_all
+        import app.models.database_models  # noqa: F401
+
         async with async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("数据库初始化完成（异步）")

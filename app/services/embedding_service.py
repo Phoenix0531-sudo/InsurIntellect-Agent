@@ -41,18 +41,30 @@ class EmbeddingService:
 
         # 分支加载（I1.3）
         lower = self.model_name.lower()
-        if lower.startswith("hf:") or lower.startswith("local:"):
-            if HuggingFaceEmbeddings is None:
-                raise RuntimeError("HuggingFaceEmbeddings 未安装或不可用")
+        if lower.startswith("local:hash") or lower in {"local-hash", "hash", "offline"}:
+            from app.services.local_hash_embeddings import LocalHashEmbeddings
+            logger.info("初始化离线 LocalHashEmbeddings（演示默认，无需下载模型）")
+            self._embedding = LocalHashEmbeddings(dim=384)
+            self.provider = "local_hash"
+        elif lower.startswith("hf:") or lower.startswith("local:"):
+            # 本地/HF 模型；下载失败时回退 hash，保证主演示可跑
             local_model = self.model_name.split(":", 1)[1] if ":" in self.model_name else self.model_name
-            logger.info(f"初始化本地 HuggingFaceEmbeddings: model={local_model}")
-            _device = "cuda" if torch.cuda.is_available() else "cpu"
-            self._embedding = HuggingFaceEmbeddings(
-                model_name=local_model,
-                model_kwargs={"device": _device},
-                encode_kwargs={"batch_size": 32},
-            )
-            self.provider = "huggingface"
+            try:
+                if HuggingFaceEmbeddings is None:
+                    raise RuntimeError("HuggingFaceEmbeddings 未安装或不可用")
+                logger.info(f"初始化本地 HuggingFaceEmbeddings: model={local_model}")
+                _device = "cuda" if torch.cuda.is_available() else "cpu"
+                self._embedding = HuggingFaceEmbeddings(
+                    model_name=local_model,
+                    model_kwargs={"device": _device},
+                    encode_kwargs={"batch_size": 32},
+                )
+                self.provider = "huggingface"
+            except Exception as e:
+                from app.services.local_hash_embeddings import LocalHashEmbeddings
+                logger.warning(f"HuggingFace 嵌入不可用，回退 LocalHashEmbeddings: {e}")
+                self._embedding = LocalHashEmbeddings(dim=384)
+                self.provider = "local_hash"
         else:
             if OpenAIEmbeddings is None:
                 raise RuntimeError("OpenAIEmbeddings 未安装或不可用")

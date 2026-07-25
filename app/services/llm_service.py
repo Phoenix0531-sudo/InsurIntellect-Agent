@@ -168,58 +168,34 @@ class LLMService:
             self.semaphore.release()
 
     def _build_system_prompt(self) -> str:
-        """构建系统提示词"""
+        """构建系统提示词：条款证据问答，非保险顾问。"""
         return (
-            "你是一个专业的保险文档问答助手。"
-            "你的任务是基于提供的保险文档内容，准确、专业地回答用户的问题。\n"
-            "请遵循以下原则：\n"
-            "1. 仅基于提供的文档内容回答问题，不要编造信息\n"
-            "2. 如果文档中没有相关信息，请明确说明\n"
-            "3. 回答要准确、简洁、专业\n"
-            "4. 如果涉及具体的保险条款或数字，请直接引用原文\n"
-            "5. 保持客观中立的语调\n"
-            "6. 如果问题不清楚，可以要求用户澄清\n"
-            "请用中文回答问题。"
+            "你是本地保险条款检索问答助手，只根据给定条款片段作答。\n"
+            "硬性规则：\n"
+            "1. 只使用提供的条款片段，禁止编造保额、疾病、责任或监管结论。\n"
+            "2. 答案必须使用中文，并严格按三段输出：【结论】【条款依据】【不确定/边界】。\n"
+            "3. 在【条款依据】中用 [1][2] 引用片段编号，编号对应输入顺序。\n"
+            "4. 若片段不足，明确写“未在已入库条款中找到充分依据”。\n"
+            "5. 禁止给出购买建议、配置方案或“一定能获赔”的承诺。\n"
+            "6. 最后一行必须包含：本系统不构成保险销售或理赔承诺。"
         )
 
     def _build_user_prompt(self, query: str, context_chunks: List[Dict[str, Any]]) -> str:
-        """构建用户提示词（支持知识图谱事实优先展示）。"""
-        kg_parts: List[str] = []
+        """构建用户提示词（编号片段，便于 [1][2] 引用）。"""
         doc_parts: List[str] = []
-
         for i, chunk in enumerate(context_chunks, 1):
             content = chunk.get("content", "")
             page_num = chunk.get("page_number", "N/A")
             doc_name = chunk.get("document_name", "Unknown")
-            meta = chunk.get("metadata", {})
-            is_kg = False
-            try:
-                if isinstance(meta, dict):
-                    is_kg = bool(meta.get("is_kg"))
-            except Exception:
-                is_kg = False
-
-            if is_kg:
-                kg_parts.append(content)
-            else:
-                doc_parts.append(
-                    f"文档片段 {i}:\n来源: {doc_name} (第{page_num}页)\n内容: {content}\n"
-                )
-
-        sections: List[str] = []
-        if kg_parts:
-            sections.append("知识图谱事实:\n" + "\n".join(kg_parts))
-        if doc_parts:
-            sections.append("文档片段:\n" + "\n".join(doc_parts))
-
-        context = "\n\n".join(sections) if sections else "(无上下文)"
-
+            doc_parts.append(
+                f"[{i}] 来源: {doc_name} | 页码: {page_num}\n内容: {content}\n"
+            )
+        context = "\n".join(doc_parts) if doc_parts else "(无上下文)"
         prompt = (
-            "基于以下保险文档内容和知识图谱事实，请回答用户的问题：\n\n"
+            "以下是已检索到的保险条款片段：\n\n"
             f"{context}\n\n"
             f"用户问题：{query}\n\n"
-            "请基于上述内容回答问题。如果没有相关信息，请明确说明："
-            "'根据提供的文档内容和事实，我无法找到相关信息来回答这个问题'。"
+            "请按【结论】【条款依据】【不确定/边界】三段作答，并在依据中使用 [1][2] 引用。"
         )
         return prompt
 

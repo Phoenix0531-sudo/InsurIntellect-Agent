@@ -185,6 +185,81 @@ class QueryService:
             logger.warning(f"获取会话历史失败：{e}")
             return ""
     
+
+    def _best_similarity(self, chunks: List[Dict[str, Any]]) -> float:
+        best = 0.0
+        for c in chunks or []:
+            try:
+                score = c.get("similarity_score")
+                if score is None and isinstance(c.get("metadata"), dict):
+                    md = c["metadata"]
+                    score = md.get("rrf_score") or md.get("vector_score") or md.get("bm25_score")
+                    rd = md.get("ranking_details") if isinstance(md.get("ranking_details"), dict) else {}
+                    if score is None and rd:
+                        score = rd.get("final_score") or rd.get("original_similarity")
+                best = max(best, float(score or 0.0))
+            except Exception:
+                continue
+        return best
+
+    def _refusal_answer(self, reason: str = "insufficient_evidence") -> str:
+        if reason == "advice":
+            return (
+                "【结论】\n"
+                "本系统不能给出是否购买保险、是否一定获赔的建议或承诺。\n\n"
+                "【条款依据】\n"
+                "演示语料仅用于说明犹豫期、等待期、责任免除等条款检索；"
+                "真实核保与理赔取决于正式合同与事故事实。\n\n"
+                "【不确定/边界】\n"
+                "本系统不构成保险销售或理赔承诺。"
+            )
+        return (
+            "【结论】\n"
+            "未在已入库条款中找到充分依据，无法就该问题给出有引用支撑的结论。\n\n"
+            "【条款依据】\n"
+            "当前检索结果为空或相关度不足，请换用条款中的术语（如等待期、免赔额、责任免除）重试。\n\n"
+            "【不确定/边界】\n"
+            "本系统不构成保险销售或理赔承诺。"
+        )
+
+    def _is_advice_or_guarantee_question(self, question: str) -> bool:
+        q = (question or "").strip()
+        markers = [
+            "一定能获赔",
+            "保证获赔",
+            "该不该买",
+            "应不应该买",
+            "推荐购买",
+            "帮我配置",
+            "今天买",
+            "保证理赔",
+        ]
+        return any(m in q for m in markers)
+
+    def _has_llm_credentials(self) -> bool:
+        return bool((settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY or "").strip())
+
+    def _is_off_topic(self, question: str, chunks: List[Dict[str, Any]]) -> bool:
+        """Heuristic off-topic gate for demo corpus (weather / chit-chat)."""
+        q = (question or "").strip()
+        insurance_kw = [
+            "保险", "条款", "等待期", "免赔", "责任免除", "犹豫期", "理赔", "保额",
+            "身故", "重疾", "投保", "保单", "除外", "酒驾", "自杀",
+        ]
+        if any(k in q for k in insurance_kw):
+            return False
+        # non-insurance chit-chat markers
+        chat_kw = ["天气", "北京", "上海", "你好", "讲个笑话", "股票", "足球"]
+        if any(k in q for k in chat_kw):
+            return True
+        # weak overlap with top chunk text
+        if not chunks:
+            return True
+        top = (chunks[0].get("content") or "")
+        overlap = sum(1 for k in insurance_kw if k in top and k in q)
+        return overlap == 0 and len(q) < 40 and not any(c in q for c in "等待免赔责任犹豫理赔保")
+
+
     async def process_query(
         self,
         db: AsyncSession,
@@ -199,6 +274,7 @@ class QueryService:
         llm_core = LLMService.with_model(settings.OPENAI_MODEL_CORE)
         llm_light = LLMService.with_model(settings.OPENAI_MODEL_LIGHT)
         rewriter = QueryRewriterService(llm_service=llm_light)
+        simple_mode = bool(getattr(settings, "SIMPLE_RAG_MODE", True))
 
         async def _rewrite_if_enabled(user_q: str) -> Dict[str, Any]:
             if not settings.ENABLE_QUERY_REWRITING:
@@ -212,20 +288,42 @@ class QueryService:
 
         if not stream:
             try:
+                # 强边界：购买/保证获赔类问题直接拒答（仍可检索展示）
+                if self._is_advice_or_guarantee_question(request.question):
+                    try:
+                        ctx = await asyncio.wait_for(
+                            agent.abuild_context(request.question),
+                            timeout=getattr(settings, "CONTEXT_BUILD_TIMEOUT_SECS", 20),
+                        )
+                        retrieved_chunks = ctx.get("retrieved_chunks", []) or []
+                    except Exception:
+                        retrieved_chunks = []
+                    response_time = (datetime.utcnow() - start_time).total_seconds()
+                    return QueryResponse(
+                        question=request.question,
+                        answer=self._refusal_answer("advice"),
+                        query_type=request.query_type,
+                        response_time=response_time,
+                        chunks_used=len(retrieved_chunks),
+                        retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
+                        confidence_score=0.0,
+                        query_id=None,
+                    )
+
                 rewrite_result = await _rewrite_if_enabled(request.question)
                 # 使用独立查询作为检索输入
                 question_for_retrieval = rewrite_result.get("independent_query") or request.question
 
-                # 在构建上下文前调用路由器（R4.2），受开关控制
+                # 在构建上下文前调用路由器（R4.2）；SIMPLE 模式强制 RAG
                 route_result = {"route": "RAG"}
-                if settings.ENABLE_QUERY_ROUTING:
+                if (not simple_mode) and settings.ENABLE_QUERY_ROUTING:
                     router = QueryRouterService(llm_service=llm_light)
                     try:
                         route_result = await router.route_query(request.question)
                     except Exception as re:
                         logger.warning(f"查询路由失败，回退RAG: {re}")
 
-                if route_result.get("route") == "SQL":
+                if (not simple_mode) and route_result.get("route") == "SQL":
                     # SQL 路径：执行只读查询并用 LLM 总结（R4.3）
                     t2s = TextToSQLService()
                     sql_query = route_result.get("query") or ""
@@ -347,23 +445,87 @@ class QueryService:
                     or (question_for_retrieval if question_for_retrieval != request.question else None)
                 )
 
-                # 注入 KG 事实作为优先片段
-                try:
-                    kg_service = KGService()
-                    kg_facts = await kg_service.aget_facts(db, question_for_retrieval)
-                    if kg_facts:
-                        kg_chunk = {
-                            "chunk_id": None,
-                            "document_id": None,
-                            "document_name": "知识图谱事实",
-                            "content": "\n".join([f"- {f}" for f in kg_facts]),
-                            "page_number": "N/A",
-                            "similarity_score": 1.0,
-                            "metadata": {"is_kg": True, "facts_count": len(kg_facts)},
-                        }
-                        retrieved_chunks = [kg_chunk] + retrieved_chunks
-                except Exception as kg_err:
-                    logger.debug(f"KG事实注入失败：{kg_err}")
+                # 注入 KG 事实作为优先片段（仅 advanced）
+                if not simple_mode:
+                    try:
+                        kg_service = KGService()
+                        kg_facts = await kg_service.aget_facts(db, question_for_retrieval)
+                        if kg_facts:
+                            kg_chunk = {
+                                "chunk_id": None,
+                                "document_id": None,
+                                "document_name": "知识图谱事实",
+                                "content": "\n".join([f"- {f}" for f in kg_facts]),
+                                "page_number": "N/A",
+                                "similarity_score": 1.0,
+                                "metadata": {"is_kg": True, "facts_count": len(kg_facts)},
+                            }
+                            retrieved_chunks = [kg_chunk] + retrieved_chunks
+                    except Exception as kg_err:
+                        logger.debug(f"KG事实注入失败：{kg_err}")
+
+                # 拒答门闩：无检索 / 低分 / 明显离题
+                best_sim = self._best_similarity(retrieved_chunks)
+                off_topic = self._is_off_topic(request.question, retrieved_chunks)
+                if off_topic or (not retrieved_chunks) or best_sim < float(getattr(settings, "SIMILARITY_THRESHOLD", 0.2)):
+                    response_time = (datetime.utcnow() - start_time).total_seconds()
+                    response = QueryResponse(
+                        question=request.question,
+                        answer=self._refusal_answer("insufficient_evidence"),
+                        query_type=request.query_type,
+                        response_time=response_time,
+                        chunks_used=len(retrieved_chunks),
+                        retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
+                        confidence_score=round(best_sim, 4),
+                        query_id=None,
+                    )
+                    try:
+                        asyncio.create_task(
+                            self._save_query_history_bg(
+                                question=request.question,
+                                answer=response.answer,
+                                query_type=request.query_type,
+                                response_time=response_time,
+                                chunks_used=len(retrieved_chunks),
+                                session_id=getattr(request, "session_id", None),
+                                rewritten_query=rewritten_query,
+                                rewriting_metadata_json=json.dumps(
+                                    {"route": "RAG", "refused": True, "best_similarity": best_sim},
+                                    ensure_ascii=False,
+                                ),
+                                retrieved_chunks_json=json.dumps(retrieved_chunks, ensure_ascii=False) if retrieved_chunks else None,
+                            )
+                        )
+                    except Exception:
+                        pass
+                    return response
+
+                # 无 API key：检索结果诚实降级
+                if not self._has_llm_credentials():
+                    response_time = (datetime.utcnow() - start_time).total_seconds()
+                    preview_lines = []
+                    for i, c in enumerate(retrieved_chunks[:3], 1):
+                        name = c.get("document_name") or "未知文档"
+                        page = c.get("page_number")
+                        snippet = (c.get("content") or "")[:180].replace("\n", " ")
+                        preview_lines.append(f"[{i}] {name} p.{page}: {snippet}")
+                    answer_text = (
+                        "【结论】\n"
+                        "LLM 不可用（未配置 API Key），已返回检索片段摘要，未生成完整条款解释。\n\n"
+                        "【条款依据】\n"
+                        + ("\n".join(preview_lines) if preview_lines else "（无片段）")
+                        + "\n\n【不确定/边界】\n本系统不构成保险销售或理赔承诺。"
+                    )
+                    return QueryResponse(
+                        question=request.question,
+                        answer=answer_text,
+                        query_type=request.query_type,
+                        response_time=response_time,
+                        chunks_used=len(retrieved_chunks),
+                        retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks),
+                        confidence_score=round(best_sim, 4),
+                        query_id=None,
+                    )
 
                 # 非流式：调用异步非流 LLM（T2）
                 try:
@@ -372,9 +534,34 @@ class QueryService:
                             query=request.question,
                             context_chunks=retrieved_chunks,
                         ),
-                        timeout=getattr(settings, "LLM_ANSWER_TIMEOUT_SECS", 25),
+                        timeout=getattr(settings, "LLM_ANSWER_TIMEOUT_SECS", 60),
                     )
+                    if not gen_res.get("success", True):
+                        preview = []
+                        for i, c in enumerate(retrieved_chunks[:3], 1):
+                            preview.append(
+                                f"[{i}] {c.get('document_name')} p.{c.get('page_number')}: "
+                                f"{(c.get('content') or '')[:120]}"
+                            )
+                        answer_text = (
+                            "【结论】\nLLM 调用失败，以下为检索到的条款片段摘要。\n\n"
+                            "【条款依据】\n"
+                            + "\n".join(preview)
+                            + "\n\n【不确定/边界】\n本系统不构成保险销售或理赔承诺。"
+                        )
+                        response_time = (datetime.utcnow() - start_time).total_seconds()
+                        return QueryResponse(
+                            question=request.question,
+                            answer=answer_text,
+                            query_type=request.query_type,
+                            response_time=response_time,
+                            chunks_used=len(retrieved_chunks),
+                            retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks),
+                            confidence_score=round(best_sim, 4),
+                            query_id=None,
+                        )
                 except asyncio.TimeoutError:
+
                     logger.warning("LLM生成超时，返回降级响应")
                     answer_text = "系统当前繁忙，生成答案超时，请稍后重试。"
                     response_time = (datetime.utcnow() - start_time).total_seconds()

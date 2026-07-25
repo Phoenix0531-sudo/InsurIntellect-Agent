@@ -26,10 +26,14 @@ from typing import Dict, List, Any, Tuple
 from datetime import datetime
 import asyncio
 
-# 在导入langchain之前设置环境变量
+# 在导入langchain之前设置环境变量（OpenAI-compatible；兼容 siliconflow 回退）
 from app.core.config import settings
-os.environ["OPENAI_API_KEY"] = settings.SILICONFLOW_API_KEY  # 使用硅基流动的API密钥
-os.environ["OPENAI_BASE_URL"] = settings.SILICONFLOW_BASE_URL  # 使用硅基流动的基础URL
+_api_key = settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY or ""
+_base_url = settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL or ""
+if _api_key:
+    os.environ["OPENAI_API_KEY"] = _api_key
+if _base_url:
+    os.environ["OPENAI_BASE_URL"] = _base_url
 
 from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document
@@ -81,13 +85,19 @@ class InsurIntellectAgent:
         logger.info("正在初始化InsurIntellect智能代理...")
         
         try:
-            # 初始化ChatOpenAI LLM（兼容硅基流动）
+            # 初始化 ChatOpenAI（OpenAI-compatible；兼容 siliconflow 回退）
+            _model = (
+                settings.OPENAI_MODEL_CORE
+                or settings.OPENAI_MODEL
+                or settings.SILICONFLOW_MODEL
+                or "gpt-5.4"
+            )
             self.llm = ChatOpenAI(
-                model=settings.SILICONFLOW_MODEL,  # 使用硅基流动的模型
+                model=_model,
                 temperature=settings.OPENAI_TEMPERATURE,
                 max_tokens=settings.OPENAI_MAX_TOKENS,
-                api_key=settings.SILICONFLOW_API_KEY,  # 显式传递API密钥
-                base_url=settings.SILICONFLOW_BASE_URL  # 显式传递基础URL
+                api_key=settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY,
+                base_url=settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL,
             )
             logger.info("ChatOpenAI LLM初始化成功")
             
@@ -817,13 +827,25 @@ class InsurIntellectAgent:
                 for doc in top_docs:
                     md = doc.metadata or {}
                     rd = md.get("ranking_details", {})
+                    # prefer rrf / vector / bm25 as similarity for UI + refusal gate
+                    sim = (
+                        rd.get("original_similarity")
+                        or md.get("rrf_score")
+                        or md.get("vector_score")
+                        or md.get("bm25_score")
+                        or 0.0
+                    )
+                    try:
+                        sim = float(sim)
+                    except Exception:
+                        sim = 0.0
                     retrieved_chunks.append({
                         "chunk_id": md.get("chunk_id"),
                         "document_id": md.get("document_id"),
                         "document_name": md.get("document_title") or md.get("filename") or md.get("source"),
                         "content": doc.page_content,
                         "page_number": md.get("page_number"),
-                        "similarity_score": rd.get("original_similarity"),
+                        "similarity_score": sim,
                         "metadata": {
                             "ranking_details": rd,
                             "document_type": md.get("document_type"),
@@ -884,10 +906,14 @@ class InsurIntellectAgent:
                     rewritten_query = user_query
             standalone_query = rewritten_query
 
-            # 意图分类（KCP-FIX-4）：在重写后进行
+            # 意图分类：SIMPLE_RAG_MODE 下跳过，避免主路径额外 LLM 调用
             metadata_filter: Dict[str, Any] | None = None
             try:
-                if hasattr(self, "intent_service") and self.intent_service is not None:
+                if (
+                    not getattr(settings, "SIMPLE_RAG_MODE", True)
+                    and hasattr(self, "intent_service")
+                    and self.intent_service is not None
+                ):
                     intent: QueryIntent = await self.intent_service.classify_intent(rewritten_query)
                     metadata_filter = intent.metadata_filter or None
                     logger.info(f"意图分类：{intent.intent}，应用过滤器：{metadata_filter}")
@@ -1056,13 +1082,25 @@ class InsurIntellectAgent:
                     md["bm25_score"] = bm25_score_map.get(cid)
                     md["rrf_score"] = rrf_scores.get(cid)
                     rd = md.get("ranking_details", {})
+                    # prefer rrf / vector / bm25 as similarity for UI + refusal gate
+                    sim = (
+                        rd.get("original_similarity")
+                        or md.get("rrf_score")
+                        or md.get("vector_score")
+                        or md.get("bm25_score")
+                        or 0.0
+                    )
+                    try:
+                        sim = float(sim)
+                    except Exception:
+                        sim = 0.0
                     retrieved_chunks.append({
                         "chunk_id": md.get("chunk_id"),
                         "document_id": md.get("document_id"),
                         "document_name": md.get("document_title") or md.get("filename") or md.get("source"),
                         "content": doc.page_content,
                         "page_number": md.get("page_number"),
-                        "similarity_score": rd.get("original_similarity"),
+                        "similarity_score": sim,
                         "metadata": {
                             "ranking_details": rd,
                             "document_type": md.get("document_type"),
@@ -1204,13 +1242,25 @@ class InsurIntellectAgent:
                 for doc in top_docs:
                     md = doc.metadata or {}
                     rd = md.get("ranking_details", {})
+                    # prefer rrf / vector / bm25 as similarity for UI + refusal gate
+                    sim = (
+                        rd.get("original_similarity")
+                        or md.get("rrf_score")
+                        or md.get("vector_score")
+                        or md.get("bm25_score")
+                        or 0.0
+                    )
+                    try:
+                        sim = float(sim)
+                    except Exception:
+                        sim = 0.0
                     retrieved_chunks.append({
                         "chunk_id": md.get("chunk_id"),
                         "document_id": md.get("document_id"),
                         "document_name": md.get("document_title") or md.get("filename") or md.get("source"),
                         "content": doc.page_content,
                         "page_number": md.get("page_number"),
-                        "similarity_score": rd.get("original_similarity"),
+                        "similarity_score": sim,
                         "metadata": {
                             "ranking_details": rd,
                             "document_type": md.get("document_type"),
