@@ -1,11 +1,18 @@
 /* Citation-first clause RAG UI on chat-pdf dual-pane shell.
  * Product: ask → curated citations → left PDF + evidence strip.
+ * P1: stream end-only PDF/citations; refuse card styles.
+ * P2: PDF.js highlight, chip docs, chunk debug.
+ * P3: multi-turn left-pane stickiness.
  * Untrusted answer/source text always goes through escapeHtml before innerHTML.
  */
 (function () {
   const pdfSelect = document.getElementById("pdfSelect");
   const pdfEmpty = document.getElementById("pdfEmpty");
   const pdfFrame = document.getElementById("pdfFrame");
+  const pdfJsView = document.getElementById("pdfJsView");
+  const pdfCanvas = document.getElementById("pdfCanvas");
+  const pdfTextLayer = document.getElementById("pdfTextLayer");
+  const pdfHighlightLayer = document.getElementById("pdfHighlightLayer");
   const pdfTitle = document.getElementById("pdfTitle");
   const pdfSubtitle = document.getElementById("pdfSubtitle");
   const pageBadge = document.getElementById("pageBadge");
@@ -13,6 +20,7 @@
   const evidenceCite = document.getElementById("evidenceCite");
   const evidenceExcerpt = document.getElementById("evidenceExcerpt");
   const corpusMeta = document.getElementById("corpusMeta");
+  const embedMeta = document.getElementById("embedMeta");
   const messagesEl = document.getElementById("messages");
   const emptyChat = document.getElementById("emptyChat");
   const form = document.getElementById("askForm");
@@ -20,6 +28,7 @@
   const sendBtn = document.getElementById("sendBtn");
   const resetBtn = document.getElementById("resetBtn");
   const stopBtn = document.getElementById("stopBtn");
+  const debugToggle = document.getElementById("debugToggle");
   const streamToggle = document.getElementById("streamToggle");
   const genPill = document.getElementById("genPill");
   const errPill = document.getElementById("errPill");
@@ -31,15 +40,27 @@
 
   let pdfs = [];
   let activeSources = [];
-  let currentView = { name: null, url: null, page: null, index: null };
+  let lastStickyView = null; // P3: keep last citation across follow-ups
+  let currentView = { name: null, url: null, page: null, index: null, excerpt: "" };
   let isLoading = false;
   let abortController = null;
   let citeSeq = 0;
+  let debugMode = false;
+  let lastEmbeddingProvider = null;
+  let pdfDocCache = { url: null, doc: null, renderToken: 0 };
 
   const DISPLAY_FALLBACK = {
     "sample_term_life.pdf": "示例终身寿险条款",
     "sample_critical_illness.pdf": "示例重大疾病保险条款",
   };
+
+  // Configure PDF.js worker if available
+  try {
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "/static/vendor/pdfjs/pdf.worker.min.js";
+    }
+  } catch (_e) {}
 
   function escapeHtml(s) {
     return String(s ?? "")
@@ -69,10 +90,14 @@
   }
 
   function cleanExcerpt(text) {
-    let t = String(text || "").replace(/\s+/g, " ").trim();
-    // Drop leading pure metadata lines if mixed content later
+    let t = String(text || "")
+      .replace(/\s+/g, " ")
+      .trim();
     t = t
-      .replace(/^(文档名称|产品名称|文档类型|生效日期|状态)[：:][^。；;\n]{0,40}[。；;\s]*/g, "")
+      .replace(
+        /^(文档名称|产品名称|文档类型|生效日期|状态)[：:][^。；;\n]{0,40}[。；;\s]*/g,
+        ""
+      )
       .trim();
     if (t.length > 180) t = t.slice(0, 180) + "…";
     return t;
@@ -121,14 +146,199 @@
     evidenceExcerpt.textContent = excerpt || "（无摘录）";
   }
 
-  function openCitedPdf(docName, pageNumber, source, index, opts) {
+  function hidePdfViews() {
+    if (pdfFrame) {
+      pdfFrame.hidden = true;
+      pdfFrame.removeAttribute("src");
+    }
+    if (pdfJsView) pdfJsView.hidden = true;
+    if (pdfEmpty) pdfEmpty.hidden = false;
+  }
+
+  function pickHighlightNeedle(excerpt) {
+    const t = String(excerpt || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!t) return "";
+    // Prefer a mid-length continuous clause fragment
+    const parts = t.split(/[。；;！!？?\n]/).map(function (s) {
+      return s.trim();
+    });
+    let best = "";
+    parts.forEach(function (p) {
+      if (p.length >= 8 && p.length <= 48 && p.length > best.length) best = p;
+    });
+    if (best) return best;
+    return t.slice(0, Math.min(36, t.length));
+  }
+
+  async function renderPdfJs(url, pageNumber, excerpt) {
+    if (!window.pdfjsLib || !pdfCanvas || !pdfJsView) {
+      return false;
+    }
+    const page =
+      pageNumber != null && pageNumber !== "" && !Number.isNaN(Number(pageNumber))
+        ? Math.max(1, Number(pageNumber))
+        : 1;
+    const token = ++pdfDocCache.renderToken;
+    try {
+      if (pdfDocCache.url !== url || !pdfDocCache.doc) {
+        const loadingTask = window.pdfjsLib.getDocument({ url: url });
+        const doc = await loadingTask.promise;
+        if (token !== pdfDocCache.renderToken) return false;
+        pdfDocCache = { url: url, doc: doc, renderToken: token };
+      }
+      const doc = pdfDocCache.doc;
+      const pdfPage = await doc.getPage(Math.min(page, doc.numPages || page));
+      if (token !== pdfDocCache.renderToken) return false;
+
+      const wrap = document.getElementById("pdfViewerWrap");
+      const wrapW = (wrap && wrap.clientWidth) || 640;
+      const unscaled = pdfPage.getViewport({ scale: 1 });
+      const scale = Math.min(2.2, Math.max(1.0, (wrapW - 8) / unscaled.width));
+      const viewport = pdfPage.getViewport({ scale: scale });
+
+      const canvas = pdfCanvas;
+      const ctx = canvas.getContext("2d");
+      const outputScale = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(viewport.width * outputScale);
+      canvas.height = Math.floor(viewport.height * outputScale);
+      canvas.style.width = Math.floor(viewport.width) + "px";
+      canvas.style.height = Math.floor(viewport.height) + "px";
+      const transform =
+        outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+
+      if (pdfTextLayer) {
+        pdfTextLayer.innerHTML = "";
+        pdfTextLayer.style.width = canvas.style.width;
+        pdfTextLayer.style.height = canvas.style.height;
+      }
+      if (pdfHighlightLayer) {
+        pdfHighlightLayer.innerHTML = "";
+        pdfHighlightLayer.style.width = canvas.style.width;
+        pdfHighlightLayer.style.height = canvas.style.height;
+      }
+
+      await pdfPage.render({
+        canvasContext: ctx,
+        viewport: viewport,
+        transform: transform,
+      }).promise;
+      if (token !== pdfDocCache.renderToken) return false;
+
+      // Text layer for selection + highlight targeting
+      const textContent = await pdfPage.getTextContent();
+      if (token !== pdfDocCache.renderToken) return false;
+      if (pdfTextLayer && window.pdfjsLib.TextLayer) {
+        // Prefer modern TextLayer API if present
+        try {
+          const textLayer = new window.pdfjsLib.TextLayer({
+            textContentSource: textContent,
+            container: pdfTextLayer,
+            viewport: viewport,
+          });
+          await textLayer.render();
+        } catch (_tl) {
+          // Fallback: manual span placement
+          textContent.items.forEach(function (item) {
+            if (!item.str) return;
+            const tx = window.pdfjsLib.Util.transform(
+              viewport.transform,
+              item.transform
+            );
+            const span = document.createElement("span");
+            span.textContent = item.str;
+            span.style.left = tx[4] + "px";
+            span.style.top = tx[5] - item.height * scale + "px";
+            span.style.fontSize = Math.max(6, item.height * scale) + "px";
+            span.style.position = "absolute";
+            span.style.whiteSpace = "pre";
+            span.style.color = "transparent";
+            span.style.transformOrigin = "0% 0%";
+            pdfTextLayer.appendChild(span);
+          });
+        }
+      } else if (pdfTextLayer) {
+        textContent.items.forEach(function (item) {
+          if (!item.str) return;
+          const tx = window.pdfjsLib.Util.transform(
+            viewport.transform,
+            item.transform
+          );
+          const span = document.createElement("span");
+          span.textContent = item.str;
+          span.style.left = tx[4] + "px";
+          span.style.top = tx[5] - (item.height || 10) * scale + "px";
+          span.style.fontSize =
+            Math.max(6, (item.height || 10) * scale) + "px";
+          span.style.position = "absolute";
+          span.style.whiteSpace = "pre";
+          span.style.color = "transparent";
+          pdfTextLayer.appendChild(span);
+        });
+      }
+
+      // Highlight excerpt spans if found
+      const needle = pickHighlightNeedle(excerpt);
+      if (needle && pdfTextLayer && pdfHighlightLayer) {
+        const spans = Array.from(pdfTextLayer.querySelectorAll("span"));
+        const joined = spans
+          .map(function (s) {
+            return s.textContent || "";
+          })
+          .join("");
+        const idx = joined.indexOf(needle);
+        // Also try shorter needle
+        let useNeedle = needle;
+        let useIdx = idx;
+        if (useIdx < 0 && needle.length > 12) {
+          useNeedle = needle.slice(0, 12);
+          useIdx = joined.indexOf(useNeedle);
+        }
+        if (useIdx >= 0) {
+          let cursor = 0;
+          spans.forEach(function (span) {
+            const t = span.textContent || "";
+            const start = cursor;
+            const end = cursor + t.length;
+            cursor = end;
+            if (end <= useIdx || start >= useIdx + useNeedle.length) return;
+            const rect = span.getBoundingClientRect();
+            const parent = pdfJsView.getBoundingClientRect();
+            const mark = document.createElement("div");
+            mark.className = "pdf-highlight-mark";
+            mark.style.left = rect.left - parent.left + pdfJsView.scrollLeft + "px";
+            mark.style.top = rect.top - parent.top + pdfJsView.scrollTop + "px";
+            mark.style.width = Math.max(4, rect.width) + "px";
+            mark.style.height = Math.max(10, rect.height) + "px";
+            pdfHighlightLayer.appendChild(mark);
+            span.classList.add("is-hit");
+          });
+        } else {
+          // Portfolio-honest fallback: soft page banner when text not located
+          const banner = document.createElement("div");
+          banner.className = "pdf-highlight-fallback";
+          banner.textContent = "摘录定位：本页 · 未精确匹配文本层（仍显示页码证据）";
+          pdfHighlightLayer.appendChild(banner);
+        }
+      }
+
+      pdfEmpty.hidden = true;
+      pdfFrame.hidden = true;
+      pdfJsView.hidden = false;
+      return true;
+    } catch (err) {
+      console.warn("PDF.js render failed, falling back to iframe", err);
+      return false;
+    }
+  }
+
+  async function openCitedPdf(docName, pageNumber, source, index, opts) {
     opts = opts || {};
     const hit = resolvePdfByName(docName);
     if (!hit || !hit.url) {
-      if (opts.forceEmpty !== false) {
-        pdfFrame.hidden = true;
-        pdfFrame.removeAttribute("src");
-        pdfEmpty.hidden = false;
+      if (opts.forceEmpty !== false && !lastStickyView) {
+        hidePdfViews();
         pdfSelect.hidden = true;
         pageBadge.hidden = true;
         pdfTitle.textContent = "引用原文";
@@ -142,21 +352,22 @@
       pageNumber != null && pageNumber !== "" && !Number.isNaN(Number(pageNumber))
         ? Number(pageNumber)
         : null;
-
-    const hash = page && page > 0 ? "#page=" + page : "";
-    const nextSrc = hit.url + hash;
-    pdfEmpty.hidden = true;
-    pdfFrame.hidden = false;
-    if (pdfFrame.getAttribute("src") !== nextSrc) {
-      pdfFrame.src = nextSrc;
-    }
+    const excerpt = cleanExcerpt(
+      (source && (source.content || source.excerpt || source.text)) || ""
+    );
 
     currentView = {
       name: hit.name,
       url: hit.url,
       page: page,
       index: index || null,
+      excerpt: excerpt,
     };
+    lastStickyView = Object.assign({}, currentView, {
+      source: source || null,
+      display: hit.display_name || displayNameFor(hit.name, source || {}),
+    });
+
     const nice = hit.display_name || displayNameFor(hit.name, source || {});
     pdfTitle.textContent = nice;
     pdfSubtitle.textContent = page
@@ -190,6 +401,19 @@
     }
 
     if (source) setEvidence(source, index);
+
+    const ok = await renderPdfJs(hit.url, page || 1, excerpt);
+    if (!ok) {
+      // iframe fallback
+      const hash = page && page > 0 ? "#page=" + page : "";
+      const nextSrc = hit.url + hash;
+      pdfEmpty.hidden = true;
+      if (pdfJsView) pdfJsView.hidden = true;
+      pdfFrame.hidden = false;
+      if (pdfFrame.getAttribute("src") !== nextSrc) {
+        pdfFrame.src = nextSrc;
+      }
+    }
     return true;
   }
 
@@ -200,9 +424,16 @@
     return n > 0 ? n : 1;
   }
 
-  function followAnswerCitation(sources, answerText) {
+  function followAnswerCitation(sources, answerText, opts) {
+    opts = opts || {};
     activeSources = Array.isArray(sources) ? sources : [];
     if (!activeSources.length) {
+      // P3 stickiness: keep last citation unless forced clear
+      if (lastStickyView && !opts.forceClear) {
+        pdfTitle.textContent = lastStickyView.display || "引用原文";
+        pdfSubtitle.textContent = "沿用上一轮引用（本轮无新引用）";
+        return;
+      }
       pdfTitle.textContent = "引用原文";
       pdfSubtitle.textContent = "本次回答没有可用引用";
       setEvidence(null);
@@ -210,7 +441,20 @@
     }
     let idx = firstAnswerCiteIndex(answerText);
     if (idx > activeSources.length) idx = 1;
+
+    // P3: if same first cite as current, keep view (avoid flicker)
     const src = activeSources[idx - 1];
+    const nextName = basename(src.document_name || src.source || src.filename || "");
+    const nextPage = src.page_number ?? src.page;
+    if (
+      lastStickyView &&
+      basename(lastStickyView.name || "") === nextName &&
+      Number(lastStickyView.page) === Number(nextPage) &&
+      !opts.force
+    ) {
+      setEvidence(src, idx);
+      return;
+    }
     openCitedPdf(
       src.document_name || src.source || src.filename,
       src.page_number ?? src.page,
@@ -302,7 +546,6 @@
 
   function formatAnswerHtml(text) {
     const raw = String(text || "");
-    // Prefer structured sections when backend uses 【结论】【条款依据】【不确定/边界】
     const sectionRe =
       /【\s*(结论|条款依据|不确定[/／]?边界|边界)\s*】\s*([\s\S]*?)(?=【\s*(?:结论|条款依据|不确定[/／]?边界|边界)\s*】|$)/g;
     const parts = [];
@@ -339,7 +582,6 @@
       return '<div class="answer-sections">' + blocks + "</div>";
     }
 
-    // Fallback plain formatting
     return linkCitations(
       escapeHtml(raw).replace(
         /^(【[^】]+】|[一二三四五六七八九十]+[、.．]|结论|条款依据|不确定[/／]?边界)([^\n]*)/gm,
@@ -347,6 +589,46 @@
           return '<span class="sec-head">' + head + (rest || "") + "</span>";
         }
       )
+    );
+  }
+
+  function debugPanelHtml(sources, meta) {
+    if (!debugMode) return "";
+    meta = meta || {};
+    const rows = (sources || [])
+      .map(function (s, i) {
+        return (
+          "<tr><td>" +
+          (i + 1) +
+          "</td><td>" +
+          escapeHtml(String(s.chunk_id != null ? s.chunk_id : "—")) +
+          "</td><td>" +
+          escapeHtml(
+            String(
+              s.similarity_score != null
+                ? Number(s.similarity_score).toFixed(4)
+                : "—"
+            )
+          ) +
+          "</td><td>" +
+          escapeHtml(basename(s.document_name || "")) +
+          "</td><td>p." +
+          escapeHtml(String(s.page_number ?? s.page ?? "—")) +
+          "</td></tr>"
+        );
+      })
+      .join("");
+    return (
+      '<details class="debug-panel"><summary>调试 · chunk_id / 分数' +
+      (meta.embedding_provider
+        ? " · " + escapeHtml(meta.embedding_provider)
+        : lastEmbeddingProvider
+          ? " · " + escapeHtml(lastEmbeddingProvider)
+          : "") +
+      (meta.answer_kind ? " · kind=" + escapeHtml(meta.answer_kind) : "") +
+      "</summary><table class=\"debug-table\"><thead><tr><th>#</th><th>chunk_id</th><th>score</th><th>doc</th><th>page</th></tr></thead><tbody>" +
+      (rows || "<tr><td colspan=5>无片段</td></tr>") +
+      "</tbody></table></details>"
     );
   }
 
@@ -360,6 +642,10 @@
         );
         const page = s.page_number ?? s.page ?? "—";
         const excerpt = cleanExcerpt(s.content || s.excerpt || s.text || "");
+        const score =
+          s.similarity_score != null
+            ? Number(s.similarity_score).toFixed(3)
+            : "";
         return (
           '<button type="button" class="cite-card" data-cite-index="' +
           (i + 1) +
@@ -376,6 +662,9 @@
           '<span class="cite-page">p.' +
           escapeHtml(String(page)) +
           "</span>" +
+          (debugMode && score
+            ? '<span class="cite-score">' + escapeHtml(score) + "</span>"
+            : "") +
           "</div>" +
           '<div class="cite-excerpt">' +
           escapeHtml(excerpt) +
@@ -400,6 +689,32 @@
     messagesEl.hidden = false;
   }
 
+  function kindClass(kind) {
+    const k = String(kind || "answer").toLowerCase();
+    if (k === "refusal" || k === "insufficient_evidence") return "is-refusal";
+    if (k === "advice") return "is-advice";
+    if (k === "llm_unavailable") return "is-llm-unavailable";
+    if (k === "degraded") return "is-degraded";
+    return "is-answer";
+  }
+
+  function kindBadge(kind) {
+    const k = String(kind || "answer").toLowerCase();
+    const map = {
+      refusal: "拒答 / 无充分依据",
+      insufficient_evidence: "拒答 / 无充分依据",
+      advice: "边界 / 不构成建议",
+      llm_unavailable: "LLM 不可用 · 仅检索",
+      degraded: "降级响应",
+      answer: "",
+    };
+    const label = map[k] || "";
+    if (!label) return "";
+    return (
+      '<div class="kind-badge">' + escapeHtml(label) + "</div>"
+    );
+  }
+
   function appendMessage(role, html, extraClass) {
     ensureMessagesVisible();
     const div = document.createElement("div");
@@ -421,7 +736,8 @@
     return div;
   }
 
-  function setAssistantBody(row, answerText, sources) {
+  function setAssistantBody(row, answerText, sources, meta) {
+    meta = meta || {};
     const body = row.querySelector(".message-body");
     if (!body) return;
     citeSeq += 1;
@@ -429,13 +745,42 @@
     row.dataset.citeGroup = groupId;
     row._sources = sources || [];
     row._answerText = answerText || "";
+    row._meta = meta;
+
+    const kind = meta.answer_kind || "answer";
+    row.classList.remove(
+      "is-pending",
+      "is-refusal",
+      "is-advice",
+      "is-llm-unavailable",
+      "is-degraded",
+      "is-answer"
+    );
+    row.classList.add(kindClass(kind));
+
+    // During stream we may pass preformatted; for final always rebuild
     body.innerHTML =
+      kindBadge(kind) +
       formatAnswerHtml(answerText || "") +
-      citationsHtml(sources || [], groupId);
+      citationsHtml(sources || [], groupId) +
+      debugPanelHtml(sources || [], meta);
     messagesEl.scrollTop = messagesEl.scrollHeight;
-    followAnswerCitation(sources || [], answerText || "");
-    const idx = firstAnswerCiteIndex(answerText);
-    highlightActiveCite(groupId, Math.min(idx, (sources || []).length || 1));
+
+    // P1: only open PDF/evidence after final setAssistantBody (never mid-stream)
+    if (sources && sources.length) {
+      followAnswerCitation(sources, answerText || {}, { force: false });
+      const idx = firstAnswerCiteIndex(answerText);
+      highlightActiveCite(groupId, Math.min(idx, sources.length || 1));
+    } else {
+      followAnswerCitation([], answerText || "", { forceClear: false });
+    }
+
+    if (meta.embedding_provider) {
+      lastEmbeddingProvider = meta.embedding_provider;
+      if (embedMeta) {
+        embedMeta.textContent = "embed:" + meta.embedding_provider;
+      }
+    }
   }
 
   function highlightActiveCite(groupId, index) {
@@ -478,8 +823,16 @@
     } else if (Array.isArray(data.citations)) {
       list = data.citations;
     }
-    // UI safety: never show more than 4 even if backend regresses
     return list.slice(0, 4);
+  }
+
+  function responseMeta(data) {
+    data = data || {};
+    return {
+      answer_kind: data.answer_kind || "answer",
+      embedding_provider: data.embedding_provider || lastEmbeddingProvider,
+      confidence_score: data.confidence_score,
+    };
   }
 
   async function askOnce(question) {
@@ -530,6 +883,7 @@
     let buffer = "";
     let full = "";
     let finalPayload = null;
+    // P1: ignore mid-stream context/chunks — only use end/final for citations+PDF
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -546,20 +900,29 @@
           if (obj.type === "token" || obj.delta || obj.token) {
             full += obj.token || obj.delta || obj.content || "";
             onDelta(full);
+          } else if (obj.type === "context") {
+            // intentionally ignore mid-stream chunks (prevent left-pane flash)
           } else if (
-            obj.answer ||
-            obj.retrieved_chunks ||
+            obj.type === "end" ||
             obj.type === "final" ||
-            obj.type === "end"
+            obj.answer ||
+            (obj.retrieved_chunks && obj.type !== "context")
           ) {
             finalPayload = obj.data || obj;
-            if (obj.answer) finalPayload = obj;
+            if (obj.answer || obj.type === "end") finalPayload = obj;
+            if (obj.answer && !full) full = obj.answer;
           }
         } catch (_e) {
-          full += line;
-          onDelta(full);
+          // non-json lines: treat as token only if look like plain text
+          if (line[0] !== "{" && line[0] !== "[") {
+            full += line;
+            onDelta(full);
+          }
         }
       }
+    }
+    if (finalPayload && !finalPayload.answer && full) {
+      finalPayload.answer = full;
     }
     onFinal(finalPayload || { answer: full, retrieved_chunks: [] });
   }
@@ -580,14 +943,15 @@
           q,
           function (partial) {
             const body = assistantRow.querySelector(".message-body");
-            // During stream: plain text only; open PDF after final with citations
+            // P1: mid-stream tokens only — no citations, no PDF open
             if (body) body.innerHTML = formatAnswerHtml(partial);
           },
           function (data) {
             setAssistantBody(
               assistantRow,
               data.answer || data.response || "",
-              normalizeSources(data)
+              normalizeSources(data),
+              responseMeta(data)
             );
           }
         );
@@ -596,20 +960,20 @@
         setAssistantBody(
           assistantRow,
           data.answer || data.response || "（空响应）",
-          normalizeSources(data)
+          normalizeSources(data),
+          responseMeta(data)
         );
       }
     } catch (err) {
       if (err.name === "AbortError") {
-        setAssistantBody(assistantRow, "已停止。", []);
+        setAssistantBody(assistantRow, "已停止。", [], { answer_kind: "degraded" });
       } else {
         showError(err.message || String(err));
         setAssistantBody(
           assistantRow,
-          '<span style="color:#dc2626">' +
-            escapeHtml(err.message || String(err)) +
-            "</span>",
-          []
+          "请求失败：" + (err.message || String(err)),
+          [],
+          { answer_kind: "degraded" }
         );
       }
     } finally {
@@ -630,10 +994,9 @@
     emptyChat.hidden = false;
     emptyChat.removeAttribute("aria-hidden");
     activeSources = [];
-    currentView = { name: null, url: null, page: null, index: null };
-    pdfFrame.hidden = true;
-    pdfFrame.removeAttribute("src");
-    pdfEmpty.hidden = false;
+    lastStickyView = null;
+    currentView = { name: null, url: null, page: null, index: null, excerpt: "" };
+    hidePdfViews();
     pdfSelect.hidden = true;
     pageBadge.hidden = true;
     pdfTitle.textContent = "引用原文";
@@ -663,10 +1026,12 @@
       return p.url === url;
     });
     if (!hit) return;
-    // Manual override: keep page if possible, evidence from active matching source
     const match =
       activeSources.find(function (s) {
-        return basename(s.document_name || "").toLowerCase() === basename(hit.name).toLowerCase();
+        return (
+          basename(s.document_name || "").toLowerCase() ===
+          basename(hit.name).toLowerCase()
+        );
       }) || null;
     openCitedPdf(
       hit.name,
@@ -702,6 +1067,21 @@
     e.preventDefault();
     if (abortController) abortController.abort();
   });
+
+  if (debugToggle) {
+    debugToggle.addEventListener("click", function (e) {
+      e.preventDefault();
+      debugMode = !debugMode;
+      debugToggle.classList.toggle("is-active", debugMode);
+      debugToggle.textContent = debugMode ? "调试开" : "调试";
+      // Re-render last assistant bodies if any
+      document.querySelectorAll(".message.is-assistant").forEach(function (row) {
+        if (row._answerText != null) {
+          setAssistantBody(row, row._answerText, row._sources || [], row._meta || {});
+        }
+      });
+    });
+  }
 
   document.querySelectorAll(".prompt-chip").forEach(function (btn) {
     btn.addEventListener("click", function () {

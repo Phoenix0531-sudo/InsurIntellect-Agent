@@ -33,7 +33,7 @@ class QueryService:
         """初始化查询服务,使用InsurIntellectAgent RAG工作流"""
         # 延迟初始化agent,避免在服务启动时就创建
         self._agent = None
-    
+
     @property
     def agent(self):
         """获取agent实例,使用延迟初始化"""
@@ -47,6 +47,13 @@ class QueryService:
                 raise
         return self._agent
 
+    @property
+    def embedding_service(self):
+        """Expose agent embedding service for provider metadata on responses."""
+        try:
+            return getattr(self.agent, "embedding_service", None)
+        except Exception:
+            return None
 
     # Cover / metadata-only lines that are weak as citations.
     _WEAK_META_MARKERS = (
@@ -253,10 +260,16 @@ class QueryService:
             else:
                 page_val = None
 
-            sim_raw = c.get("similarity_score")
-            if sim_raw is None:
-                rd = md.get("ranking_details") if isinstance(md.get("ranking_details"), dict) else {}
-                sim_raw = rd.get("original_similarity") if rd else None
+            rd = md.get("ranking_details") if isinstance(md.get("ranking_details"), dict) else {}
+            sim_raw = (
+                md.get("vector_score")
+                if md.get("vector_score") is not None
+                else c.get("vector_score")
+                if c.get("vector_score") is not None
+                else rd.get("original_similarity")
+                if rd
+                else c.get("similarity_score")
+            )
             try:
                 sim_val = float(sim_raw) if sim_raw is not None else 0.0
             except Exception:
@@ -323,18 +336,53 @@ class QueryService:
             return ""
     
 
+    def _normalize_sim(self, score: Any) -> float:
+        try:
+            s = float(score)
+        except Exception:
+            return 0.0
+        if 0.0 <= s <= 1.0:
+            return s
+        if s > 1.0:
+            if s <= 2.0:
+                return max(0.0, min(1.0, 1.0 - s))
+            return max(0.0, min(1.0, 1.0 / (1.0 + s)))
+        return 0.0
+
+    def _chunk_gate_score(self, c: Dict[str, Any]) -> float:
+        """Score used by refusal gate: prefer cosine vector_score over RRF (~0.03)."""
+        md = c.get("metadata") if isinstance(c.get("metadata"), dict) else {}
+        rd = md.get("ranking_details") if isinstance(md.get("ranking_details"), dict) else {}
+        # Prefer true cosine-like scores first; ignore tiny RRF unless nothing else.
+        preferred = [
+            rd.get("original_similarity"),
+            md.get("vector_score"),
+            c.get("vector_score"),
+        ]
+        best = 0.0
+        for s in preferred:
+            if s is None:
+                continue
+            best = max(best, self._normalize_sim(s))
+        if best > 0:
+            return best
+        fallback = [
+            c.get("similarity_score"),
+            md.get("bm25_score"),
+            rd.get("final_score"),
+            md.get("rrf_score"),
+        ]
+        for s in fallback:
+            if s is None:
+                continue
+            best = max(best, self._normalize_sim(s))
+        return best
+
     def _best_similarity(self, chunks: List[Dict[str, Any]]) -> float:
         best = 0.0
         for c in chunks or []:
             try:
-                score = c.get("similarity_score")
-                if score is None and isinstance(c.get("metadata"), dict):
-                    md = c["metadata"]
-                    score = md.get("rrf_score") or md.get("vector_score") or md.get("bm25_score")
-                    rd = md.get("ranking_details") if isinstance(md.get("ranking_details"), dict) else {}
-                    if score is None and rd:
-                        score = rd.get("final_score") or rd.get("original_similarity")
-                best = max(best, float(score or 0.0))
+                best = max(best, self._chunk_gate_score(c))
             except Exception:
                 continue
         return best
@@ -450,6 +498,8 @@ class QueryService:
                         retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
                         confidence_score=0.0,
                         query_id=None,
+                        answer_kind="advice",
+                        embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                     )
 
                 rewrite_result = await _rewrite_if_enabled(request.question)
@@ -506,6 +556,8 @@ class QueryService:
                         retrieved_chunks=[],
                         confidence_score=0.9,
                         query_id=None,
+                        answer_kind="answer",
+                        embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                     )
 
                     # 后台保存查询历史，避免阻塞主流程
@@ -561,6 +613,8 @@ class QueryService:
                         retrieved_chunks=[],
                         confidence_score=0.0,
                         query_id=None,
+                        answer_kind="degraded",
+                        embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                     )
                     # 后台保存，不阻塞
                     try:
@@ -625,6 +679,8 @@ class QueryService:
                         retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
                         confidence_score=round(best_sim, 4),
                         query_id=None,
+                        answer_kind="refusal",
+                        embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                     )
                     try:
                         asyncio.create_task(
@@ -672,6 +728,8 @@ class QueryService:
                         retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks),
                         confidence_score=round(best_sim, 4),
                         query_id=None,
+                        answer_kind="llm_unavailable",
+                        embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                     )
 
                 # 非流式：调用异步非流 LLM（T2）
@@ -706,6 +764,8 @@ class QueryService:
                             retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks),
                             confidence_score=round(best_sim, 4),
                             query_id=None,
+                            answer_kind="answer",
+                            embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                         )
                 except asyncio.TimeoutError:
 
@@ -721,6 +781,8 @@ class QueryService:
                         retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
                         confidence_score=0.0,
                         query_id=None,
+                        answer_kind="answer",
+                        embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                     )
                     # 后台保存，不阻塞
                     try:
@@ -754,6 +816,8 @@ class QueryService:
                         retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
                         confidence_score=0.0,
                         query_id=None,
+                        answer_kind="answer",
+                        embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                     )
                     # 后台保存，不阻塞
                     try:
@@ -787,6 +851,8 @@ class QueryService:
                     retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
                     confidence_score=0.9,
                     query_id=None,
+                    answer_kind="answer",
+                    embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                 )
 
                 # 保存查询历史
@@ -832,6 +898,8 @@ class QueryService:
                     retrieved_chunks=[],
                     confidence_score=0.0,
                     query_id=None,
+                    answer_kind="degraded",
+                    embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                 )
                 try:
                     asyncio.create_task(
@@ -1242,14 +1310,28 @@ class QueryService:
                     ]
                 except Exception:
                     chunk_payload = retrieved_chunks
+                # Classify stream end for UI state cards
+                _ans = final_text.strip() if final_text else ""
+                _kind = "answer"
+                _q = request.question or ""
+                if "未在已入库条款中找到充分依据" in _ans:
+                    _kind = "refusal"
+                elif any(k in _q for k in ("一定能获赔", "该不该买", "要不要买", "保证获赔")):
+                    _kind = "advice"
+                elif "LLM 不可用" in _ans:
+                    _kind = "llm_unavailable"
+                elif "系统当前繁忙" in _ans or "出现了错误" in _ans:
+                    _kind = "degraded"
                 yield {
                     "type": "end",
-                    "answer": final_text.strip() if final_text else "",
+                    "answer": _ans,
                     "response_time": response_time if response_time else (datetime.utcnow() - start_time).total_seconds(),
                     "query_id": query_id,
                     "success": True,
                     "retrieved_chunks": chunk_payload,
                     "chunks_used": len(chunk_payload),
+                    "answer_kind": _kind,
+                    "embedding_provider": getattr(getattr(self, "embedding_service", None), "provider", None),
                 }
 
             except Exception as e:

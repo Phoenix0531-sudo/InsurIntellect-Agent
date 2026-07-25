@@ -64,6 +64,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+
+def _normalize_vector_score(score: float) -> float:
+    """Map raw vector score/distance into roughly [0,1] cosine-like similarity."""
+    try:
+        s = float(score)
+    except Exception:
+        return 0.0
+    if 0.0 <= s <= 1.0:
+        return s
+    # LangChain/Chroma may return distance (lower better). Cosine distance often in [0, 2].
+    if s > 1.0:
+        if s <= 2.0:
+            return max(0.0, min(1.0, 1.0 - s))
+        return max(0.0, min(1.0, 1.0 / (1.0 + s)))
+    # negative unexpected
+    return 0.0
+
+
 class InsurIntellectAgent:
     """
     InsurIntellect智能代理核心类
@@ -827,11 +845,11 @@ class InsurIntellectAgent:
                 for doc in top_docs:
                     md = doc.metadata or {}
                     rd = md.get("ranking_details", {})
-                    # prefer rrf / vector / bm25 as similarity for UI + refusal gate
+                    # prefer vector cosine over rrf for UI + refusal gate
                     sim = (
                         rd.get("original_similarity")
-                        or md.get("rrf_score")
                         or md.get("vector_score")
+                        or md.get("rrf_score")
                         or md.get("bm25_score")
                         or 0.0
                     )
@@ -959,7 +977,7 @@ class InsurIntellectAgent:
                         cid = (doc.metadata or {}).get("chunk_id")
                         if cid:
                             ids.append(cid)
-                            score_map[cid] = float(score)
+                            score_map[cid] = _normalize_vector_score(score)
                     return results, score_map, ids
                 except Exception:
                     # 回退：使用底层 Chroma collection 查询距离
@@ -983,7 +1001,7 @@ class InsurIntellectAgent:
                             md = payload["metadatas"][0][i]
                             dist = payload["distances"][0][i]
                             # 以(1 - 距离)作为相似度近似
-                            score = 1.0 - float(dist)
+                            score = _normalize_vector_score(1.0 - float(dist))
                             d = Document(page_content=text, metadata=md)
                             docs.append((d, score))
                             ids.append(cid)
@@ -1082,11 +1100,11 @@ class InsurIntellectAgent:
                     md["bm25_score"] = bm25_score_map.get(cid)
                     md["rrf_score"] = rrf_scores.get(cid)
                     rd = md.get("ranking_details", {})
-                    # prefer rrf / vector / bm25 as similarity for UI + refusal gate
+                    # prefer vector cosine over rrf for UI + refusal gate
                     sim = (
                         rd.get("original_similarity")
-                        or md.get("rrf_score")
                         or md.get("vector_score")
+                        or md.get("rrf_score")
                         or md.get("bm25_score")
                         or 0.0
                     )
@@ -1242,11 +1260,11 @@ class InsurIntellectAgent:
                 for doc in top_docs:
                     md = doc.metadata or {}
                     rd = md.get("ranking_details", {})
-                    # prefer rrf / vector / bm25 as similarity for UI + refusal gate
+                    # prefer vector cosine over rrf for UI + refusal gate
                     sim = (
                         rd.get("original_similarity")
-                        or md.get("rrf_score")
                         or md.get("vector_score")
+                        or md.get("rrf_score")
                         or md.get("bm25_score")
                         or 0.0
                     )

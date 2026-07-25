@@ -32,10 +32,11 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = Field(default="gpt-5.4", description="OpenAI模型（兼容旧字段）")
     OPENAI_MODEL_LIGHT: str = Field(default="gpt-5.4", description="轻量任务模型（意图/重写/路由）")
     OPENAI_MODEL_CORE: str = Field(default="gpt-5.4", description="核心生成模型（答案生成/摘要）")
-    # 默认本地 HF 嵌入，避免演示依赖远程 embedding 网关
+    # Prefer real local HF embedding when available; fall back to local:hash offline.
+    # Clash/proxy may be required once to download; thereafter uses HF hub cache.
     OPENAI_EMBEDDING_MODEL: str = Field(
-        default="local:hash",
-        description="嵌入模型（hf: 前缀走本地 HuggingFace）",
+        default="hf:BAAI/bge-small-zh-v1.5",
+        description="嵌入模型：hf:<name> 本地 sentence-transformers；local:hash 离线哈希回退",
     )
     OPENAI_MAX_TOKENS: int = Field(default=1000, description="最大令牌数")
     OPENAI_TEMPERATURE: float = Field(default=0.2, description="温度参数")
@@ -75,7 +76,11 @@ class Settings(BaseSettings):
 
     # 查询配置
     MAX_RETRIEVED_CHUNKS: int = Field(default=8, description="最大检索块数")
-    SIMILARITY_THRESHOLD: float = Field(default=0.20, description="相似度阈值（演示语料可略低）")
+    # bge-small-zh cosine typically ~0.45–0.75 on-topic; hash embeds need much lower.
+    SIMILARITY_THRESHOLD: float = Field(
+        default=0.32,
+        description="相似度阈值（bge 真向量建议 0.30–0.40；local:hash 可降到 0.05）",
+    )
 
     # 查询重写与路由配置（主演示默认关闭）
     ENABLE_QUERY_REWRITING: bool = Field(default=False, description="启用口语化查询意图转换引擎")

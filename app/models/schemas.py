@@ -45,6 +45,9 @@ class QueryResponse(BaseModel):
     retrieved_chunks: List[RetrievedChunk] = Field(default_factory=list)
     confidence_score: float = 0.0
     query_id: Optional[int] = None
+    # UI state: answer | refusal | advice | llm_unavailable | degraded
+    answer_kind: str = "answer"
+    embedding_provider: Optional[str] = None
 
     model_config = ConfigDict(extra="ignore")
 

@@ -50,7 +50,9 @@ uv pip install pytest ruff httpx
 
 cp .env.example .env
 # set OPENAI_BASE_URL / OPENAI_API_KEY for your OpenAI-compatible gateway
-# default demo embedding is offline: OPENAI_EMBEDDING_MODEL=local:hash
+# preferred: local HF embedding (cached after first download)
+# OPENAI_EMBEDDING_MODEL=hf:BAAI/bge-small-zh-v1.5
+# offline fallback: OPENAI_EMBEDDING_MODEL=local:hash  (re-ingest after switch)
 
 # sample corpus (public fake clauses, not real policies)
 uv run python scripts/generate_sample_corpus.py --copy-to-data

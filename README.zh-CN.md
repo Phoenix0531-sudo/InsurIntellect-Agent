@@ -46,7 +46,8 @@ uv pip install pytest ruff httpx
 
 cp .env.example .env
 # 填写 OPENAI_BASE_URL / OPENAI_API_KEY（OpenAI 兼容网关，如本机 new-api）
-# 默认嵌入 OPENAI_EMBEDDING_MODEL=local:hash（离线，无需下载 HF）
+# 默认嵌入：hf:BAAI/bge-small-zh-v1.5（本机 HF 缓存；首次下载可能需要代理）
+# 离线回退：OPENAI_EMBEDDING_MODEL=local:hash（切换后需重新 ingest）
 
 uv run python scripts/generate_sample_corpus.py --copy-to-data
 uv run python scripts/simple_ingest.py --reset
