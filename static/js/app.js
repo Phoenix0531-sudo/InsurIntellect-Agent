@@ -1,5 +1,5 @@
 /* Citation-first clause RAG UI on chat-pdf dual-pane shell.
- * Product flow: ask → answer + sources → left pane opens cited PDF.
+ * Product: ask → curated citations → left PDF + evidence strip.
  * Untrusted answer/source text always goes through escapeHtml before innerHTML.
  */
 (function () {
@@ -9,6 +9,9 @@
   const pdfTitle = document.getElementById("pdfTitle");
   const pdfSubtitle = document.getElementById("pdfSubtitle");
   const pageBadge = document.getElementById("pageBadge");
+  const evidenceStrip = document.getElementById("evidenceStrip");
+  const evidenceCite = document.getElementById("evidenceCite");
+  const evidenceExcerpt = document.getElementById("evidenceExcerpt");
   const corpusMeta = document.getElementById("corpusMeta");
   const messagesEl = document.getElementById("messages");
   const emptyChat = document.getElementById("emptyChat");
@@ -28,10 +31,15 @@
 
   let pdfs = [];
   let activeSources = [];
-  let currentView = { name: null, url: null, page: null };
+  let currentView = { name: null, url: null, page: null, index: null };
   let isLoading = false;
   let abortController = null;
   let citeSeq = 0;
+
+  const DISPLAY_FALLBACK = {
+    "sample_term_life.pdf": "示例终身寿险条款",
+    "sample_critical_illness.pdf": "示例重大疾病保险条款",
+  };
 
   function escapeHtml(s) {
     return String(s ?? "")
@@ -47,6 +55,29 @@
     return parts[parts.length - 1] || s;
   }
 
+  function displayNameFor(docName, extra) {
+    extra = extra || {};
+    if (extra.display_name) return extra.display_name;
+    if (extra.metadata && extra.metadata.display_name) {
+      return extra.metadata.display_name;
+    }
+    const bare = basename(docName);
+    if (DISPLAY_FALLBACK[bare]) return DISPLAY_FALLBACK[bare];
+    const hit = resolvePdfByName(docName);
+    if (hit && hit.display_name) return hit.display_name;
+    return bare || "未知文档";
+  }
+
+  function cleanExcerpt(text) {
+    let t = String(text || "").replace(/\s+/g, " ").trim();
+    // Drop leading pure metadata lines if mixed content later
+    t = t
+      .replace(/^(文档名称|产品名称|文档类型|生效日期|状态)[：:][^。；;\n]{0,40}[。；;\s]*/g, "")
+      .trim();
+    if (t.length > 180) t = t.slice(0, 180) + "…";
+    return t;
+  }
+
   function resolvePdfByName(docName) {
     if (!docName) return null;
     const bare = basename(docName).toLowerCase();
@@ -55,17 +86,46 @@
         return basename(p.name).toLowerCase() === bare;
       }) ||
       pdfs.find(function (p) {
-        return basename(p.name).toLowerCase().includes(bare) || bare.includes(basename(p.name).toLowerCase());
+        return (
+          basename(p.name).toLowerCase().includes(bare) ||
+          bare.includes(basename(p.name).toLowerCase())
+        );
       }) ||
       null
     );
   }
 
-  function openCitedPdf(docName, pageNumber, opts) {
+  function setEvidence(source, index) {
+    if (!evidenceStrip) return;
+    if (!source) {
+      evidenceStrip.hidden = true;
+      if (evidenceCite) evidenceCite.textContent = "";
+      if (evidenceExcerpt) evidenceExcerpt.textContent = "";
+      return;
+    }
+    const name = displayNameFor(
+      source.document_name || source.source || source.filename,
+      source
+    );
+    const page = source.page_number ?? source.page;
+    const excerpt = cleanExcerpt(
+      source.content || source.excerpt || source.text || ""
+    );
+    evidenceStrip.hidden = false;
+    evidenceCite.textContent =
+      "[" +
+      (index || "?") +
+      "] " +
+      name +
+      (page != null && page !== "" ? " · p." + page : "");
+    evidenceExcerpt.textContent = excerpt || "（无摘录）";
+  }
+
+  function openCitedPdf(docName, pageNumber, source, index, opts) {
     opts = opts || {};
     const hit = resolvePdfByName(docName);
     if (!hit || !hit.url) {
-      if (opts.forceEmpty) {
+      if (opts.forceEmpty !== false) {
         pdfFrame.hidden = true;
         pdfFrame.removeAttribute("src");
         pdfEmpty.hidden = false;
@@ -73,6 +133,7 @@
         pageBadge.hidden = true;
         pdfTitle.textContent = "引用原文";
         pdfSubtitle.textContent = "暂未匹配到可打开的条款 PDF";
+        setEvidence(null);
       }
       return false;
     }
@@ -82,7 +143,6 @@
         ? Number(pageNumber)
         : null;
 
-    // Always rebuild src so #page=N reloads even for same file.
     const hash = page && page > 0 ? "#page=" + page : "";
     const nextSrc = hit.url + hash;
     pdfEmpty.hidden = true;
@@ -91,10 +151,16 @@
       pdfFrame.src = nextSrc;
     }
 
-    currentView = { name: hit.name, url: hit.url, page: page };
-    pdfTitle.textContent = basename(hit.name);
+    currentView = {
+      name: hit.name,
+      url: hit.url,
+      page: page,
+      index: index || null,
+    };
+    const nice = hit.display_name || displayNameFor(hit.name, source || {});
+    pdfTitle.textContent = nice;
     pdfSubtitle.textContent = page
-      ? "当前定位到引用页 p." + page
+      ? "定位到引用页 p." + page
       : "答案引用的条款原文";
     if (page) {
       pageBadge.hidden = false;
@@ -104,38 +170,52 @@
       pageBadge.textContent = "";
     }
 
-    // Optional switcher among corpus docs (manual override, not a gate)
     if (pdfs.length) {
       pdfSelect.hidden = false;
       pdfSelect.innerHTML = pdfs
         .map(function (p) {
           const sel = p.url === hit.url ? " selected" : "";
+          const label = p.display_name || displayNameFor(p.name, p);
           return (
             '<option value="' +
             escapeHtml(p.url) +
             '"' +
             sel +
             ">" +
-            escapeHtml(basename(p.name)) +
+            escapeHtml(label) +
             "</option>"
           );
         })
         .join("");
     }
+
+    if (source) setEvidence(source, index);
     return true;
   }
 
-  function followTopCitation(sources) {
+  function firstAnswerCiteIndex(answerText) {
+    const m = String(answerText || "").match(/\[(\d+)\]/);
+    if (!m) return 1;
+    const n = parseInt(m[1], 10);
+    return n > 0 ? n : 1;
+  }
+
+  function followAnswerCitation(sources, answerText) {
     activeSources = Array.isArray(sources) ? sources : [];
     if (!activeSources.length) {
       pdfTitle.textContent = "引用原文";
       pdfSubtitle.textContent = "本次回答没有可用引用";
+      setEvidence(null);
       return;
     }
-    const top = activeSources[0];
+    let idx = firstAnswerCiteIndex(answerText);
+    if (idx > activeSources.length) idx = 1;
+    const src = activeSources[idx - 1];
     openCitedPdf(
-      top.document_name || top.source || top.filename,
-      top.page_number ?? top.page,
+      src.document_name || src.source || src.filename,
+      src.page_number ?? src.page,
+      src,
+      idx,
       {}
     );
   }
@@ -159,13 +239,13 @@
       return;
     }
     errPill.hidden = false;
-    errPill.textContent = "Error: " + msg;
+    errPill.textContent = "错误：" + msg;
   }
 
   async function loadCorpus() {
     try {
       const res = await fetch("/api/v1/corpus");
-      if (!res.ok) throw new Error("corpus " + res.status);
+      if (!res.ok) throw new Error("语料接口 " + res.status);
       const data = await res.json();
       const docs = data.documents || [];
       pdfs = docs
@@ -173,17 +253,22 @@
           const name = d.name || d.document_name || d.filename || "document.pdf";
           let url = d.url;
           if (!url && name) url = "/samples/" + encodeURIComponent(name);
-          return { name: name, url: url, pages: d.pages };
+          return {
+            name: name,
+            url: url,
+            pages: d.pages,
+            display_name:
+              d.display_name || DISPLAY_FALLBACK[basename(name)] || null,
+          };
         })
         .filter(function (p) {
           return !!p.url;
         });
 
       const chunks = data.chunk_count != null ? data.chunk_count : "—";
-      corpusMeta.textContent = pdfs.length + " docs · " + chunks + " chunks";
-      // Do NOT auto-open a PDF. Left pane waits for citations.
+      corpusMeta.textContent = pdfs.length + " 份文档 · " + chunks + " 片段";
     } catch (err) {
-      corpusMeta.textContent = "corpus error";
+      corpusMeta.textContent = "语料加载失败";
       showError(err.message || String(err));
     }
   }
@@ -193,44 +278,88 @@
       const res = await fetch("/api/v1/health/");
       if (!res.ok) throw new Error("health " + res.status);
       const data = await res.json();
-      healthText.textContent = (data.status || "ok").toLowerCase();
+      const st = (data.status || "ok").toLowerCase();
+      healthText.textContent =
+        st === "healthy" || st === "ok" ? "服务正常" : st;
     } catch (_e) {
-      healthText.textContent = "offline";
+      healthText.textContent = "离线";
     }
   }
 
+  function linkCitations(escapedText) {
+    return escapedText.replace(/\[(\d+)\]/g, function (_m, n) {
+      return (
+        '<button type="button" class="cite-ref" data-cite-index="' +
+        n +
+        '" title="打开引用 [' +
+        n +
+        ']">[' +
+        n +
+        "]</button>"
+      );
+    });
+  }
+
   function formatAnswerHtml(text) {
-    const escaped = escapeHtml(text);
-    return escaped
-      .replace(
+    const raw = String(text || "");
+    // Prefer structured sections when backend uses 【结论】【条款依据】【不确定/边界】
+    const sectionRe =
+      /【\s*(结论|条款依据|不确定[/／]?边界|边界)\s*】\s*([\s\S]*?)(?=【\s*(?:结论|条款依据|不确定[/／]?边界|边界)\s*】|$)/g;
+    const parts = [];
+    let m;
+    while ((m = sectionRe.exec(raw)) !== null) {
+      parts.push({ title: m[1], body: (m[2] || "").trim() });
+    }
+    if (parts.length >= 2) {
+      const blocks = parts
+        .map(function (p) {
+          let kind = "is-evidence";
+          let label = p.title;
+          if (p.title.indexOf("结论") >= 0) {
+            kind = "is-conclusion";
+            label = "结论";
+          } else if (p.title.indexOf("依据") >= 0) {
+            kind = "is-evidence";
+            label = "条款依据";
+          } else {
+            kind = "is-boundary";
+            label = "不确定 / 边界";
+          }
+          return (
+            '<section class="answer-section ' +
+            kind +
+            '"><div class="answer-section-label">' +
+            escapeHtml(label) +
+            '</div><div class="answer-section-body">' +
+            linkCitations(escapeHtml(p.body)) +
+            "</div></section>"
+          );
+        })
+        .join("");
+      return '<div class="answer-sections">' + blocks + "</div>";
+    }
+
+    // Fallback plain formatting
+    return linkCitations(
+      escapeHtml(raw).replace(
         /^(【[^】]+】|[一二三四五六七八九十]+[、.．]|结论|条款依据|不确定[/／]?边界)([^\n]*)/gm,
-        function (_m, head, rest) {
+        function (_mm, head, rest) {
           return '<span class="sec-head">' + head + (rest || "") + "</span>";
         }
       )
-      .replace(/\[(\d+)\]/g, function (_m, n) {
-        return (
-          '<button type="button" class="cite-ref" data-cite-index="' +
-          n +
-          '" title="打开引用 [' +
-          n +
-          ']">[' +
-          n +
-          "]</button>"
-        );
-      });
+    );
   }
 
   function citationsHtml(sources, groupId) {
     if (!sources || !sources.length) return "";
     const cards = sources
       .map(function (s, i) {
-        const name = s.document_name || s.source || s.filename || "doc";
-        const page = s.page_number ?? s.page ?? "—";
-        const excerpt = String(s.content || s.excerpt || s.text || "").slice(
-          0,
-          220
+        const name = displayNameFor(
+          s.document_name || s.source || s.filename || "doc",
+          s
         );
+        const page = s.page_number ?? s.page ?? "—";
+        const excerpt = cleanExcerpt(s.content || s.excerpt || s.text || "");
         return (
           '<button type="button" class="cite-card" data-cite-index="' +
           (i + 1) +
@@ -242,7 +371,7 @@
           (i + 1) +
           "]</span>" +
           '<span class="cite-doc">' +
-          escapeHtml(basename(name)) +
+          escapeHtml(name) +
           "</span>" +
           '<span class="cite-page">p.' +
           escapeHtml(String(page)) +
@@ -257,7 +386,7 @@
     return (
       '<div class="citations" data-cite-group="' +
       groupId +
-      '"><div class="citations-title">Sources · ' +
+      '"><div class="citations-title">来源 · ' +
       sources.length +
       " · 点击打开左侧原文</div>" +
       cards +
@@ -266,7 +395,6 @@
   }
 
   function ensureMessagesVisible() {
-    // hard hide welcome so flex layout cannot keep it on screen
     emptyChat.hidden = true;
     emptyChat.setAttribute("aria-hidden", "true");
     messagesEl.hidden = false;
@@ -281,7 +409,7 @@
       role === "user"
         ? '<svg class="message-icon" viewBox="0 0 24 24" width="18" height="18" fill="#1D9CFF"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/></svg>'
         : '<svg class="message-icon" viewBox="0 0 24 24" width="18" height="18" fill="#1D9CFF"><path d="M12 2l1.2 3.6L17 7l-3.8 1.2L12 12l-1.2-3.8L7 7l3.8-1.4L12 2zm6.5 9l.8 2.3 2.2.7-2.2.7-.8 2.3-.8-2.3-2.2-.7 2.2-.7.8-2.3z"/></svg>';
-    // Safe: icon is fixed SVG; html is pre-escaped or composed from escaped parts.
+    // Safe: fixed SVG icon + pre-escaped/composed html only.
     div.innerHTML =
       '<div class="message-row">' +
       icon +
@@ -293,17 +421,21 @@
     return div;
   }
 
-  function setAssistantBody(row, answerHtml, sources) {
+  function setAssistantBody(row, answerText, sources) {
     const body = row.querySelector(".message-body");
     if (!body) return;
     citeSeq += 1;
     const groupId = "g" + citeSeq;
     row.dataset.citeGroup = groupId;
     row._sources = sources || [];
-    body.innerHTML = answerHtml + citationsHtml(sources || [], groupId);
+    row._answerText = answerText || "";
+    body.innerHTML =
+      formatAnswerHtml(answerText || "") +
+      citationsHtml(sources || [], groupId);
     messagesEl.scrollTop = messagesEl.scrollHeight;
-    followTopCitation(sources || []);
-    highlightActiveCite(groupId, 1);
+    followAnswerCitation(sources || [], answerText || "");
+    const idx = firstAnswerCiteIndex(answerText);
+    highlightActiveCite(groupId, Math.min(idx, (sources || []).length || 1));
   }
 
   function highlightActiveCite(groupId, index) {
@@ -329,6 +461,8 @@
     openCitedPdf(
       s.document_name || s.source || s.filename,
       s.page_number ?? s.page,
+      s,
+      Number(index),
       {}
     );
     highlightActiveCite(groupId, index);
@@ -336,12 +470,16 @@
 
   function normalizeSources(data) {
     if (!data) return [];
+    let list = [];
     if (Array.isArray(data.retrieved_chunks) && data.retrieved_chunks.length) {
-      return data.retrieved_chunks;
+      list = data.retrieved_chunks;
+    } else if (Array.isArray(data.sources)) {
+      list = data.sources;
+    } else if (Array.isArray(data.citations)) {
+      list = data.citations;
     }
-    if (Array.isArray(data.sources)) return data.sources;
-    if (Array.isArray(data.citations)) return data.citations;
-    return [];
+    // UI safety: never show more than 4 even if backend regresses
+    return list.slice(0, 4);
   }
 
   async function askOnce(question) {
@@ -359,7 +497,7 @@
       return {};
     });
     if (!res.ok && !data.answer) {
-      throw new Error(data.detail || data.message || "ask failed " + res.status);
+      throw new Error(data.detail || data.message || "提问失败 " + res.status);
     }
     return data;
   }
@@ -380,7 +518,7 @@
         return {};
       });
       throw new Error(
-        errData.detail || errData.message || "stream failed " + res.status
+        errData.detail || errData.message || "流式失败 " + res.status
       );
     }
     if (!res.body || !res.body.getReader) {
@@ -411,7 +549,8 @@
           } else if (
             obj.answer ||
             obj.retrieved_chunks ||
-            obj.type === "final"
+            obj.type === "final" ||
+            obj.type === "end"
           ) {
             finalPayload = obj.data || obj;
             if (obj.answer) finalPayload = obj;
@@ -428,7 +567,6 @@
   async function handleAsk(question) {
     const q = String(question || "").trim();
     if (!q || isLoading) return;
-    // No PDF gate — corpus is whole-index hybrid retrieve.
     showError("");
     setLoading(true);
     abortController = new AbortController();
@@ -442,12 +580,13 @@
           q,
           function (partial) {
             const body = assistantRow.querySelector(".message-body");
+            // During stream: plain text only; open PDF after final with citations
             if (body) body.innerHTML = formatAnswerHtml(partial);
           },
           function (data) {
             setAssistantBody(
               assistantRow,
-              formatAnswerHtml(data.answer || data.response || ""),
+              data.answer || data.response || "",
               normalizeSources(data)
             );
           }
@@ -456,13 +595,13 @@
         const data = await askOnce(q);
         setAssistantBody(
           assistantRow,
-          formatAnswerHtml(data.answer || data.response || "(empty)"),
+          data.answer || data.response || "（空响应）",
           normalizeSources(data)
         );
       }
     } catch (err) {
       if (err.name === "AbortError") {
-        setAssistantBody(assistantRow, "Stopped.", []);
+        setAssistantBody(assistantRow, "已停止。", []);
       } else {
         showError(err.message || String(err));
         setAssistantBody(
@@ -491,7 +630,7 @@
     emptyChat.hidden = false;
     emptyChat.removeAttribute("aria-hidden");
     activeSources = [];
-    currentView = { name: null, url: null, page: null };
+    currentView = { name: null, url: null, page: null, index: null };
     pdfFrame.hidden = true;
     pdfFrame.removeAttribute("src");
     pdfEmpty.hidden = false;
@@ -499,12 +638,12 @@
     pageBadge.hidden = true;
     pdfTitle.textContent = "引用原文";
     pdfSubtitle.textContent = "提问后自动打开答案引用的条款 PDF";
+    setEvidence(null);
     input.value = "";
     sendBtn.disabled = true;
     input.focus();
   }
 
-  // Citation clicks (event delegation)
   messagesEl.addEventListener("click", function (e) {
     const ref = e.target.closest(".cite-ref, .cite-card");
     if (!ref) return;
@@ -524,7 +663,18 @@
       return p.url === url;
     });
     if (!hit) return;
-    openCitedPdf(hit.name, currentView.page || null, {});
+    // Manual override: keep page if possible, evidence from active matching source
+    const match =
+      activeSources.find(function (s) {
+        return basename(s.document_name || "").toLowerCase() === basename(hit.name).toLowerCase();
+      }) || null;
+    openCitedPdf(
+      hit.name,
+      (match && (match.page_number ?? match.page)) || currentView.page || null,
+      match || { document_name: hit.name, content: "" },
+      currentView.index || 1,
+      {}
+    );
   });
 
   form.addEventListener("submit", function (e) {

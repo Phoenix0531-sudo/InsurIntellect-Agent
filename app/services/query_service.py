@@ -47,55 +47,191 @@ class QueryService:
                 raise
         return self._agent
 
-    def _to_retrieved_chunks(self, chunks: List[Dict[str, Any]]) -> List[RetrievedChunk]:
-        """将原始检索块字典安全规范化为 RetrievedChunk 模型，避免 None/类型不匹配引发验证错误。
 
-        兼容不同来源的元数据：
-        - 缺失的 `chunk_id`/`document_id` 以 -1 兜底；字符串形式尝试转换为 int。
-        - `document_name` 优先使用字典字段，其次回退到元数据中的 `document_title`/`filename`。
-        - `page_number` 尝试转为 int，失败则置为 None。
-        - `similarity_score` 优先使用字段值，其次回退到 `ranking_details.original_similarity` 或置 0.0。
-        - `metadata` 保留为原始字典（如非字典则置为 None）。
-        """
+    # Cover / metadata-only lines that are weak as citations.
+    _WEAK_META_MARKERS = (
+        "文档名称：",
+        "产品名称：",
+        "文档类型：",
+        "生效日期：",
+        "状态：演示样本",
+        "状态：演示",
+    )
+    _CLAUSE_MARKERS = (
+        "等待期",
+        "犹豫期",
+        "责任免除",
+        "免赔",
+        "保险责任",
+        "保险金",
+        "本合同",
+        "投保人",
+        "被保险人",
+        "理赔",
+        "除外",
+        "第",
+        "条",
+    )
+
+    def _chunk_text(self, c: Dict[str, Any]) -> str:
+        content = c.get("content")
+        if content is None:
+            return ""
+        return content if isinstance(content, str) else str(content)
+
+    def _is_weak_citation_chunk(self, c: Dict[str, Any]) -> bool:
+        """True for cover/metadata-only snippets that should not lead citations."""
+        text = self._chunk_text(c).strip()
+        if not text:
+            return True
+        if len(text) < 40 and not any(m in text for m in self._CLAUSE_MARKERS):
+            return True
+        meta_hits = sum(1 for m in self._WEAK_META_MARKERS if m in text)
+        clause_hits = sum(1 for m in self._CLAUSE_MARKERS if m in text)
+        if meta_hits >= 2 and clause_hits <= 1 and len(text) < 280:
+            return True
+        if meta_hits >= 3 and clause_hits == 0:
+            return True
+        return False
+
+    def _doc_page_key(self, c: Dict[str, Any]) -> str:
+        md = c.get("metadata") if isinstance(c.get("metadata"), dict) else {}
+        name = (
+            c.get("document_name")
+            or md.get("document_title")
+            or md.get("filename")
+            or md.get("source")
+            or "unknown"
+        )
+        page = c.get("page_number")
+        if page is None:
+            page = md.get("page_number")
+        return f"{str(name).strip().lower()}|{page}"
+
+    def _relevance_bonus(self, question: str, c: Dict[str, Any]) -> float:
+        q = question or ""
+        text = self._chunk_text(c)
+        bonus = 0.0
+        for kw in (
+            "等待期", "犹豫期", "责任免除", "免赔额", "免赔",
+            "酒驾", "自杀", "重大疾病", "身故", "理赔",
+        ):
+            if kw in q and kw in text:
+                bonus += 0.15
+        if any(m in text for m in self._CLAUSE_MARKERS):
+            bonus += 0.05
+        if self._is_weak_citation_chunk(c):
+            bonus -= 0.5
+        return bonus
+
+    def curate_citations(
+        self,
+        chunks: List[Dict[str, Any]],
+        question: str = "",
+        *,
+        limit: int = 4,
+    ) -> List[Dict[str, Any]]:
+        """Dedupe + drop weak cover chunks + keep top-N for answer [1]..[N]."""
+        if not chunks:
+            return []
+        limit = max(1, min(int(limit or 4), 8))
+        scored: List[tuple[float, int, Dict[str, Any]]] = []
+        for idx, raw in enumerate(chunks):
+            if not isinstance(raw, dict):
+                continue
+            c = dict(raw)
+            md = c.get("metadata") if isinstance(c.get("metadata"), dict) else {}
+            if not c.get("document_name"):
+                c["document_name"] = (
+                    md.get("document_title")
+                    or md.get("filename")
+                    or md.get("display_name")
+                    or "未知文档"
+                )
+            if c.get("page_number") is None and md.get("page_number") is not None:
+                c["page_number"] = md.get("page_number")
+            if not c.get("content"):
+                c["content"] = self._chunk_text(c)
+            try:
+                base = float(c.get("similarity_score") or 0.0)
+            except Exception:
+                base = 0.0
+            try:
+                if isinstance(md, dict):
+                    for k in ("rrf_score", "final_score", "bm25_score", "vector_score"):
+                        if md.get(k) is not None:
+                            base = max(base, float(md.get(k)))
+            except Exception:
+                pass
+            score = base + self._relevance_bonus(question, c)
+            if self._is_weak_citation_chunk(c):
+                score -= 1.0
+            scored.append((score, idx, c))
+        scored.sort(key=lambda t: (-t[0], t[1]))
+        strong = [t for t in scored if not self._is_weak_citation_chunk(t[2])]
+        pool = strong if strong else scored
+        selected: List[Dict[str, Any]] = []
+        seen_pages: set = set()
+        seen_prefix: set = set()
+        for _score, _idx, c in pool:
+            key = self._doc_page_key(c)
+            text = self._chunk_text(c).strip()
+            prefix = text[:48]
+            if key in seen_pages:
+                continue
+            if prefix and prefix in seen_prefix:
+                continue
+            seen_pages.add(key)
+            if prefix:
+                seen_prefix.add(prefix)
+            selected.append(c)
+            if len(selected) >= limit:
+                break
+        if not selected:
+            selected = [t[2] for t in scored[:limit]]
+        return selected
+
+
+    def _to_retrieved_chunks(self, chunks: List[Dict[str, Any]]) -> List[RetrievedChunk]:
+        """Normalize raw retrieval dicts into RetrievedChunk models."""
         normalized: List[RetrievedChunk] = []
         for c in chunks or []:
             md = c.get("metadata") if isinstance(c.get("metadata"), dict) else {}
 
-            # chunk_id
-            chunk_id_raw = c.get("chunk_id")
-            chunk_id_val: int
+            chunk_id_raw = c.get("chunk_id") if c.get("chunk_id") is not None else md.get("chunk_id")
+            chunk_id_val: Any = -1
             if isinstance(chunk_id_raw, int):
                 chunk_id_val = chunk_id_raw
-            elif isinstance(chunk_id_raw, str):
+            elif isinstance(chunk_id_raw, str) and chunk_id_raw.strip():
+                s = chunk_id_raw.strip()
                 try:
-                    chunk_id_val = int(chunk_id_raw)
+                    chunk_id_val = int(s)
                 except Exception:
-                    chunk_id_val = -1
-            else:
-                chunk_id_val = -1
+                    chunk_id_val = s
+            elif chunk_id_raw is not None:
+                chunk_id_val = str(chunk_id_raw)
 
-            # document_id
-            doc_id_raw = c.get("document_id")
-            document_id_val: int
+            doc_id_raw = c.get("document_id") if c.get("document_id") is not None else md.get("document_id")
+            document_id_val: Any = -1
             if isinstance(doc_id_raw, int):
                 document_id_val = doc_id_raw
-            elif isinstance(doc_id_raw, str):
+            elif isinstance(doc_id_raw, str) and doc_id_raw.strip():
+                s = doc_id_raw.strip()
                 try:
-                    document_id_val = int(doc_id_raw)
+                    document_id_val = int(s)
                 except Exception:
-                    document_id_val = -1
-            else:
-                document_id_val = -1
+                    document_id_val = s
+            elif doc_id_raw is not None:
+                document_id_val = str(doc_id_raw)
 
-            # document_name
             document_name_val = (
                 c.get("document_name")
+                or md.get("display_name")
                 or md.get("document_title")
                 or md.get("filename")
                 or "未知文档"
             )
 
-            # content
             content_val = c.get("content") if c.get("content") is not None else ""
             if not isinstance(content_val, str):
                 try:
@@ -103,8 +239,9 @@ class QueryService:
                 except Exception:
                     content_val = ""
 
-            # page_number
             page_raw = c.get("page_number")
+            if page_raw is None:
+                page_raw = md.get("page_number")
             page_val: Optional[int]
             if isinstance(page_raw, int):
                 page_val = page_raw
@@ -116,7 +253,6 @@ class QueryService:
             else:
                 page_val = None
 
-            # similarity_score
             sim_raw = c.get("similarity_score")
             if sim_raw is None:
                 rd = md.get("ranking_details") if isinstance(md.get("ranking_details"), dict) else {}
@@ -125,14 +261,16 @@ class QueryService:
                 sim_val = float(sim_raw) if sim_raw is not None else 0.0
             except Exception:
                 sim_val = 0.0
-            # 夹逼到 [0, 1]
             if sim_val < 0.0:
                 sim_val = 0.0
             if sim_val > 1.0:
                 sim_val = 1.0
 
-            # metadata
-            metadata_val = md if isinstance(md, dict) else None
+            metadata_val = dict(md) if isinstance(md, dict) else {}
+            if c.get("display_name") and "display_name" not in metadata_val:
+                metadata_val["display_name"] = c.get("display_name")
+            if not metadata_val:
+                metadata_val = None
 
             normalized.append(
                 RetrievedChunk(
@@ -145,7 +283,6 @@ class QueryService:
                     metadata=metadata_val,
                 )
             )
-
         return normalized
 
     async def _get_chat_history(
@@ -296,6 +433,11 @@ class QueryService:
                             timeout=getattr(settings, "CONTEXT_BUILD_TIMEOUT_SECS", 20),
                         )
                         retrieved_chunks = ctx.get("retrieved_chunks", []) or []
+                        retrieved_chunks = self.curate_citations(
+                            retrieved_chunks,
+                            getattr(request, "question", "") or "",
+                            limit=4,
+                        )
                     except Exception:
                         retrieved_chunks = []
                     response_time = (datetime.utcnow() - start_time).total_seconds()
@@ -439,6 +581,11 @@ class QueryService:
                         pass
                     return fallback
                 retrieved_chunks = ctx.get("retrieved_chunks", []) or []
+                retrieved_chunks = self.curate_citations(
+                    retrieved_chunks,
+                    getattr(request, "question", "") or "",
+                    limit=4,
+                )
                 rewritten_query = (
                     ctx.get("rewritten_query")
                     or (rewrite_result.get("independent_query") if rewrite_result else None)
@@ -803,6 +950,11 @@ class QueryService:
                 # 异步构建上下文
                 ctx = await agent.abuild_context(question_for_retrieval)
                 retrieved_chunks = ctx.get("retrieved_chunks", []) or []
+                retrieved_chunks = self.curate_citations(
+                    retrieved_chunks,
+                    getattr(request, "question", "") or "",
+                    limit=4,
+                )
                 rewritten_query = (
                     ctx.get("rewritten_query")
                     or (rewrite_result.get("independent_query") if rewrite_result else None)
@@ -905,12 +1057,21 @@ class QueryService:
                     logger.warning(f"流式查询历史保存失败: {save_error}")
                     query_id = None
 
+                try:
+                    chunk_payload = [
+                        rc.model_dump() if hasattr(rc, "model_dump") else dict(rc)
+                        for rc in self._to_retrieved_chunks(retrieved_chunks)
+                    ]
+                except Exception:
+                    chunk_payload = retrieved_chunks
                 end_evt = {
                     "type": "end",
                     "answer": final_text.strip() if final_text else "",
                     "response_time": (datetime.utcnow() - start_time).total_seconds(),
                     "query_id": query_id,
                     "success": True,
+                    "retrieved_chunks": chunk_payload,
+                    "chunks_used": len(chunk_payload),
                 }
                 yield f"event: end\n"
                 yield f"data: {_json.dumps(end_evt, ensure_ascii=False)}\n\n"
@@ -970,6 +1131,11 @@ class QueryService:
                 # 构建上下文（RAG前四步）
                 ctx = agent.build_context(question_for_retrieval)
                 retrieved_chunks = ctx.get("retrieved_chunks", []) or []
+                retrieved_chunks = self.curate_citations(
+                    retrieved_chunks,
+                    getattr(request, "question", "") or "",
+                    limit=4,
+                )
                 rewritten_query = (
                     ctx.get("rewritten_query")
                     or (rewrite_result.get("independent_query") if rewrite_result else None)
@@ -1069,12 +1235,21 @@ class QueryService:
                     logger.warning(f"流式查询历史保存失败: {save_error}")
                     query_id = None
 
+                try:
+                    chunk_payload = [
+                        rc.model_dump() if hasattr(rc, "model_dump") else dict(rc)
+                        for rc in self._to_retrieved_chunks(retrieved_chunks)
+                    ]
+                except Exception:
+                    chunk_payload = retrieved_chunks
                 yield {
                     "type": "end",
                     "answer": final_text.strip() if final_text else "",
                     "response_time": response_time if response_time else (datetime.utcnow() - start_time).total_seconds(),
                     "query_id": query_id,
                     "success": True,
+                    "retrieved_chunks": chunk_payload,
+                    "chunks_used": len(chunk_payload),
                 }
 
             except Exception as e:

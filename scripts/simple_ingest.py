@@ -119,13 +119,18 @@ def ingest(pdf_dir: Path, persist_dir: Path, collection: str, reset: bool) -> Di
     with (processed / "bm25_chunk_map.json").open("w", encoding="utf-8") as f:
         json.dump(chunk_map, f, ensure_ascii=False, indent=2)
 
-    # corpus manifest for UI
+    # corpus manifest for UI (Chinese display names for sample files)
+    display_names = {
+        "sample_term_life.pdf": "示例终身寿险条款",
+        "sample_critical_illness.pdf": "示例重大疾病保险条款",
+    }
     manifest = {
         "documents": [
             {
                 "name": p.name,
                 "path": str(p),
                 "pages": len(_extract_pages(p)),
+                "display_name": display_names.get(p.name, p.stem),
             }
             for p in pdfs
         ],

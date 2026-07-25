@@ -372,6 +372,49 @@ a {
   background: hsl(var(--muted-foreground));
 }
 
+/* ========== Evidence strip (current citation excerpt) ========== */
+.evidence-strip {
+  flex-shrink: 0;
+  border-bottom: 1px solid hsl(var(--border) / 0.55);
+  background: color-mix(in srgb, hsl(var(--primary)) 5%, #fff);
+  padding: 0.55rem 0.85rem 0.65rem;
+}
+
+.evidence-strip-top {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.28rem;
+}
+
+.evidence-label {
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: hsl(var(--primary));
+}
+
+.evidence-cite {
+  font-size: 0.72rem;
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.evidence-excerpt {
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: hsl(var(--foreground) / 0.88);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
+
 /* ========== PDF viewer ========== */
 .pdf-viewer-wrap {
   flex: 1;
@@ -484,6 +527,65 @@ a {
   color: hsl(var(--foreground) / 0.94);
 }
 
+/* Structured three-section answer */
+.answer-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  white-space: normal;
+}
+
+.answer-section {
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: calc(var(--radius));
+  background: hsl(var(--card));
+  padding: 0.55rem 0.7rem 0.65rem;
+}
+
+.answer-section.is-conclusion {
+  border-color: color-mix(in srgb, hsl(var(--primary)) 28%, hsl(var(--border)));
+  background: color-mix(in srgb, hsl(var(--primary)) 4%, #fff);
+}
+
+.answer-section.is-evidence {
+  border-color: hsl(var(--border) / 0.85);
+}
+
+.answer-section.is-boundary {
+  border-color: color-mix(in srgb, #94a3b8 35%, hsl(var(--border)));
+  background: #f8fafc;
+  color: hsl(var(--muted-foreground));
+}
+
+.answer-section-label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: hsl(var(--primary));
+  margin-bottom: 0.28rem;
+}
+
+.answer-section.is-boundary .answer-section-label {
+  color: #64748b;
+}
+
+.answer-section-body {
+  font-size: 0.88rem;
+  line-height: 1.7;
+  letter-spacing: -0.01em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: hsl(var(--foreground) / 0.94);
+}
+
+.answer-section.is-boundary .answer-section-body {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.84rem;
+}
+
 .sec-head {
   display: block;
   font-weight: 650;
@@ -529,7 +631,6 @@ a {
   font-size: 0.72rem;
   font-weight: 650;
   letter-spacing: 0.01em;
-  text-transform: uppercase;
   color: hsl(var(--muted-foreground));
   margin-bottom: 0.5rem;
 }

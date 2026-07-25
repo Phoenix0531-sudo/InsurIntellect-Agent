@@ -55,12 +55,18 @@ async def list_corpus() -> Dict[str, Any]:
                 pass
 
     # Attach browser-loadable URLs (chat-pdf selectedPdf.url pattern)
+    display_fallback = {
+        "sample_term_life.pdf": "示例终身寿险条款",
+        "sample_critical_illness.pdf": "示例重大疾病保险条款",
+    }
     samples_dir = Path("samples").resolve()
     pdf_dir = Path(settings.PDF_STORAGE_PATH).resolve()
     enriched: List[Dict[str, Any]] = []
     for doc in documents:
         item = dict(doc)
         name = item.get("name") or item.get("document_name") or ""
+        if not item.get("display_name") and name:
+            item["display_name"] = display_fallback.get(name, Path(name).stem)
         path_str = item.get("path") or ""
         url = item.get("url")
         if not url and name:

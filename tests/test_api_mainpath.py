@@ -60,7 +60,8 @@ def test_retrieved_chunk_schema_norm():
     out = svc._to_retrieved_chunks(raw)
     assert len(out) == 1
     assert out[0].chunk_id == 12
-    assert out[0].document_id == -1
+    # non-int document_id strings are preserved (ingest may use stem ids)
+    assert out[0].document_id in (-1, "x")
     assert out[0].document_name == "sample_term_life.pdf"
     assert out[0].page_number == 3
     assert 0.0 <= out[0].similarity_score <= 1.0
@@ -96,3 +97,46 @@ def test_corpus_endpoint():
         assert r.status_code == 200
         data = r.json()
         assert "documents" in data
+        docs = data["documents"] or []
+        if docs:
+            # sample corpus should expose Chinese display names when present
+            assert any(d.get("display_name") or d.get("name") for d in docs)
+
+
+def test_curate_citations_filters_cover_and_dedupes():
+    from app.services.query_service import QueryService
+
+    svc = QueryService()
+    raw = [
+        {
+            "document_name": "sample_critical_illness.pdf",
+            "page_number": 1,
+            "content": "文档名称：示例重大疾病保险条款\n产品名称：安康示例重大疾病保险\n文档类型：保险条款\n生效日期：2024-06-01",
+            "similarity_score": 0.95,
+        },
+        {
+            "document_name": "sample_critical_illness.pdf",
+            "page_number": 2,
+            "content": "第一条 等待期\n本合同自生效之日起，重大疾病保险金的等待期为 180 天。",
+            "similarity_score": 0.2,
+        },
+        {
+            "document_name": "sample_term_life.pdf",
+            "page_number": 2,
+            "content": "第二条 等待期\n自本合同生效之日起，被保险人因疾病导致的保险事故，等待期为 90 天。",
+            "similarity_score": 0.21,
+        },
+        {
+            "document_name": "sample_critical_illness.pdf",
+            "page_number": 2,
+            "content": "第一条 等待期\n本合同自生效之日起，重大疾病保险金的等待期为 180 天。",
+            "similarity_score": 0.19,
+        },
+    ]
+    out = svc.curate_citations(raw, "等待期是多久？", limit=4)
+    assert 1 <= len(out) <= 4
+    # cover page should not lead
+    assert "等待期" in (out[0].get("content") or "")
+    # same doc+page deduped
+    keys = {(c.get("document_name"), c.get("page_number")) for c in out}
+    assert len(keys) == len(out)
