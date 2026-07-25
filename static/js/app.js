@@ -1,24 +1,33 @@
-/* InsurIntellect UI — wired to clause RAG APIs.
- * Structure mirrors chat-pdf / chatpdf-yt / AnythingLLM patterns in static HTML/CSS.
+/* Chat shell behavior adapted from trangiabach/chat-pdf components:
+ * ChatPanel / ChatPdfPicker / ChatPdfViewer / ChatAIWindow / ChatAIInput / ChatMessages
+ * Data: our /api/v1/corpus + POST /api/v1/queries/ask (not their Next API routes).
+ * HTML injection uses escapeHtml for untrusted answer/source text.
  */
 (function () {
-  const thread = document.getElementById("thread");
-  const emptyState = document.getElementById("emptyState");
+  const pdfSelect = document.getElementById("pdfSelect");
+  const pdfEmpty = document.getElementById("pdfEmpty");
+  const pdfFrame = document.getElementById("pdfFrame");
+  const corpusMeta = document.getElementById("corpusMeta");
+  const messagesEl = document.getElementById("messages");
+  const emptyChat = document.getElementById("emptyChat");
   const form = document.getElementById("askForm");
   const input = document.getElementById("messageInput");
-  const sendButton = document.getElementById("sendButton");
-  const streamToggle = document.getElementById("streamToggle");
-  const clearBtn = document.getElementById("clearBtn");
+  const sendBtn = document.getElementById("sendBtn");
   const resetBtn = document.getElementById("resetBtn");
-  const docList = document.getElementById("docList");
-  const corpusCount = document.getElementById("corpusCount");
-  const healthDot = document.getElementById("healthDot");
+  const stopBtn = document.getElementById("stopBtn");
+  const streamToggle = document.getElementById("streamToggle");
+  const genPill = document.getElementById("genPill");
+  const errPill = document.getElementById("errPill");
   const healthText = document.getElementById("healthText");
+  const panelGroup = document.getElementById("panelGroup");
+  const pdfPanel = document.getElementById("pdfPanel");
+  const aiPanel = document.getElementById("aiPanel");
+  const resizeHandle = document.getElementById("resizeHandle");
 
-  let busy = false;
+  let pdfs = [];
+  let selectedPdf = null;
+  let isLoading = false;
   let abortController = null;
-  let emptyHTML = emptyState ? emptyState.outerHTML : "";
-  let activeDoc = null;
 
   function escapeHtml(s) {
     return String(s ?? "")
@@ -28,31 +37,104 @@
       .replace(/"/g, "&quot;");
   }
 
-  function setBusy(v) {
-    busy = v;
-    sendButton.disabled = v;
-    input.disabled = v;
-    if (resetBtn) resetBtn.disabled = false;
+  function setLoading(v) {
+    isLoading = v;
+    sendBtn.disabled = v || !String(input.value || "").trim();
+    if (genPill) genPill.hidden = !v;
+    if (stopBtn) stopBtn.hidden = !v;
+    const lastIcon = messagesEl.querySelector(".message.is-assistant:last-child .message-icon");
+    if (lastIcon) lastIcon.classList.toggle("spin", v);
   }
 
-  function hideEmpty() {
-    const el = document.getElementById("emptyState");
-    if (el) el.remove();
+  function showError(msg) {
+    if (!errPill) return;
+    if (!msg) {
+      errPill.hidden = true;
+      errPill.textContent = "";
+      return;
+    }
+    errPill.hidden = false;
+    errPill.textContent = "Error: " + msg;
   }
 
-  function showEmpty() {
-    thread.innerHTML = emptyHTML;
-    bindPromptCards();
+  function selectPdf(url) {
+    selectedPdf = pdfs.find(function (p) {
+      return p.url === url;
+    }) || null;
+    if (selectedPdf && selectedPdf.url) {
+      pdfEmpty.hidden = true;
+      pdfFrame.hidden = false;
+      pdfFrame.src = selectedPdf.url;
+      pdfSelect.value = selectedPdf.url;
+    } else {
+      pdfFrame.hidden = true;
+      pdfFrame.removeAttribute("src");
+      pdfEmpty.hidden = false;
+      pdfSelect.value = "";
+    }
   }
 
-  function autoGrow() {
-    input.style.height = "auto";
-    input.style.height = Math.min(Math.max(input.scrollHeight, 100), 180) + "px";
+  async function loadCorpus() {
+    try {
+      const res = await fetch("/api/v1/corpus");
+      if (!res.ok) throw new Error("corpus " + res.status);
+      const data = await res.json();
+      const docs = data.documents || [];
+      pdfs = docs
+        .map(function (d) {
+          const name = d.name || d.document_name || d.filename || "document.pdf";
+          let url = d.url;
+          if (!url && name) url = "/samples/" + encodeURIComponent(name);
+          return {
+            name: name,
+            url: url,
+            chunk_count: d.chunk_count ?? d.chunks,
+          };
+        })
+        .filter(function (p) {
+          return !!p.url;
+        });
+
+      pdfSelect.innerHTML =
+        '<option value="">Pick a PDF file...</option>' +
+        pdfs
+          .map(function (p) {
+            return (
+              '<option value="' +
+              escapeHtml(p.url) +
+              '">' +
+              escapeHtml(p.name) +
+              "</option>"
+            );
+          })
+          .join("");
+
+      const chunks = data.chunk_count != null ? data.chunk_count : "—";
+      corpusMeta.textContent = pdfs.length + " PDFs · " + chunks + " chunks";
+
+      if (pdfs.length) {
+        selectPdf(pdfs[0].url);
+      }
+    } catch (err) {
+      corpusMeta.textContent = "corpus error";
+      showError(err.message || String(err));
+    }
+  }
+
+  async function loadHealth() {
+    try {
+      const res = await fetch("/api/v1/health/");
+      if (!res.ok) throw new Error("health " + res.status);
+      const data = await res.json();
+      const status = (data.status || "ok").toLowerCase();
+      healthText.textContent = status;
+    } catch (_e) {
+      healthText.textContent = "offline";
+    }
   }
 
   function formatAnswerHtml(text) {
-    const raw = String(text ?? "");
-    const escaped = escapeHtml(raw);
+    const escaped = escapeHtml(text);
     return escaped
       .replace(
         /^(【[^】]+】|[一二三四五六七八九十]+[、.．]|结论|条款依据|不确定[/／]?边界)([^\n]*)/gm,
@@ -63,54 +145,22 @@
       .replace(/\[(\d+)\]/g, '<a class="cite-ref" href="#cite-$1">[$1]</a>');
   }
 
-  function createCitationsHtml(sources) {
-    if (!sources || !sources.length) {
-      return (
-        '<div class="citations">' +
-        '<div class="citations-head">' +
-        '<span class="citations-title">Sources</span>' +
-        '<span class="citations-note">0</span>' +
-        "</div>" +
-        '<div class="cite-grid">' +
-        '<div class="cite-card is-empty">本次无可用引用片段（检索为空、低分拒答，或仅返回边界说明）。</div>' +
-        "</div></div>"
-      );
-    }
-
-    const pills = sources
-      .slice(0, 3)
-      .map(function (_s, i) {
-        return (
-          '<span class="cite-pill-dot" title="source ' +
-          (i + 1) +
-          '">' +
-          (i + 1) +
-          "</span>"
-        );
-      })
-      .join("");
-
+  function citationsHtml(sources) {
+    if (!sources || !sources.length) return "";
     const cards = sources
       .map(function (s, i) {
-        const name = s.document_name || s.source || s.filename || "未知文档";
+        const name = s.document_name || s.source || s.filename || "doc";
         const page = s.page_number ?? s.page ?? "—";
         const excerpt = String(s.content || s.excerpt || s.text || "").slice(0, 220);
-        const score = s.similarity_score;
-        const scoreText =
-          typeof score === "number" && !Number.isNaN(score)
-            ? "score " + score.toFixed(3)
-            : "";
         return (
-          '<article class="cite-card" id="cite-' +
+          '<div class="cite-card" id="cite-' +
           (i + 1) +
           '">' +
-          '<div class="cite-top">' +
+          '<div class="cite-card-top">' +
           '<span class="cite-idx">[' +
           (i + 1) +
           "]</span>" +
-          '<span class="cite-doc" title="' +
-          escapeHtml(name) +
-          '">' +
+          '<span class="cite-doc">' +
           escapeHtml(name) +
           "</span>" +
           '<span class="cite-page">p.' +
@@ -119,59 +169,49 @@
           "</div>" +
           '<div class="cite-excerpt">' +
           escapeHtml(excerpt) +
-          "</div>" +
-          (scoreText ? '<div class="cite-score">' + scoreText + "</div>" : "") +
-          "</article>"
+          "</div></div>"
         );
       })
       .join("");
-
     return (
-      '<div class="citations">' +
-      '<div class="citations-head">' +
-      '<span class="citations-title">Sources</span>' +
-      '<span class="citations-note">' +
+      '<div class="citations"><div class="citations-title">Sources · ' +
       sources.length +
-      "</span>" +
-      '<div class="cite-pills">' +
-      pills +
-      (sources.length > 3
-        ? '<span class="citations-note">+ ' + (sources.length - 3) + "</span>"
-        : "") +
       "</div>" +
-      "</div>" +
-      '<div class="cite-grid">' +
       cards +
-      "</div></div>"
+      "</div>"
     );
   }
 
-  function appendMessage(role, contentHtml, extraClass) {
-    hideEmpty();
-    const row = document.createElement("div");
-    row.className =
-      "msg-row is-" + role + (extraClass ? " " + extraClass : "");
-    const avatar = role === "user" ? "●" : "✦";
-    row.innerHTML =
-      '<div class="msg-inner">' +
-      '<div class="msg-avatar" aria-hidden="true">' +
-      avatar +
-      "</div>" +
-      '<div class="msg-body">' +
-      contentHtml +
-      "</div>" +
-      "</div>";
-    thread.appendChild(row);
-    thread.scrollTop = thread.scrollHeight;
-    return row;
+  function ensureMessagesVisible() {
+    emptyChat.hidden = true;
+    messagesEl.hidden = false;
   }
 
-  function setAssistantContent(row, answerHtml, sources) {
-    const body = row.querySelector(".msg-body");
+  function appendMessage(role, html, extraClass) {
+    ensureMessagesVisible();
+    const div = document.createElement("div");
+    div.className =
+      "message is-" + role + (extraClass ? " " + extraClass : "");
+    const icon =
+      role === "user"
+        ? '<svg class="message-icon" viewBox="0 0 24 24" width="20" height="20" fill="#1D9CFF"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/></svg>'
+        : '<svg class="message-icon" viewBox="0 0 24 24" width="20" height="20" fill="#1D9CFF"><path d="M12 2l1.2 3.6L17 7l-3.8 1.2L12 12l-1.2-3.8L7 7l3.8-1.4L12 2zm6.5 9l.8 2.3 2.2.7-2.2.7-.8 2.3-.8-2.3-2.2-.7 2.2-.7.8-2.3z"/></svg>';
+    div.innerHTML =
+      '<div class="message-row">' +
+      icon +
+      '<div class="message-body">' +
+      html +
+      "</div></div>";
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+
+  function setAssistantBody(row, answerHtml, sources) {
+    const body = row.querySelector(".message-body");
     if (!body) return;
-    body.innerHTML = answerHtml + createCitationsHtml(sources || []);
-    row.classList.remove("is-pending");
-    thread.scrollTop = thread.scrollHeight;
+    body.innerHTML = answerHtml + citationsHtml(sources || []);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   function normalizeSources(data) {
@@ -184,102 +224,15 @@
     return [];
   }
 
-  async function loadCorpus() {
-    try {
-      const res = await fetch("/api/v1/corpus");
-      if (!res.ok) throw new Error("corpus " + res.status);
-      const data = await res.json();
-      const docs = data.documents || data.items || data.docs || [];
-      const totalChunks = data.total_chunks ?? data.chunk_count ?? null;
-      corpusCount.textContent =
-        docs.length +
-        " docs" +
-        (totalChunks != null ? " · " + totalChunks + " chunks" : "");
-
-      if (!docs.length) {
-        docList.innerHTML =
-          '<div class="doc-empty">暂无已索引文档。请运行 sample corpus + ingest。</div>';
-        return;
-      }
-
-      docList.innerHTML = docs
-        .map(function (d, idx) {
-          const name =
-            d.name || d.document_name || d.filename || d.title || "document";
-          const chunks = d.chunk_count ?? d.chunks ?? d.n_chunks ?? "—";
-          const id = d.id || d.document_id || name;
-          const active = activeDoc === id || (activeDoc == null && idx === 0);
-          if (activeDoc == null && idx === 0) activeDoc = id;
-          return (
-            '<button type="button" class="doc-item' +
-            (active ? " is-active" : "") +
-            '" data-id="' +
-            escapeHtml(String(id)) +
-            '" role="listitem">' +
-            '<span class="doc-item-icon">PDF</span>' +
-            '<span class="doc-item-body">' +
-            '<span class="doc-item-name">' +
-            escapeHtml(name) +
-            "</span>" +
-            '<span class="doc-item-meta">' +
-            escapeHtml(String(chunks)) +
-            " chunks</span>" +
-            "</span></button>"
-          );
-        })
-        .join("");
-
-      docList.querySelectorAll(".doc-item").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          activeDoc = btn.getAttribute("data-id");
-          docList.querySelectorAll(".doc-item").forEach(function (el) {
-            el.classList.toggle("is-active", el === btn);
-          });
-        });
-      });
-    } catch (err) {
-      docList.innerHTML =
-        '<div class="doc-empty">无法加载语料：' +
-        escapeHtml(err.message || String(err)) +
-        "</div>";
-      corpusCount.textContent = "error";
-    }
-  }
-
-  async function loadHealth() {
-    try {
-      const res = await fetch("/api/v1/health/");
-      if (!res.ok) throw new Error("health " + res.status);
-      const data = await res.json();
-      const status = (data.status || data.overall || "ok").toLowerCase();
-      healthDot.classList.remove("ok", "warn", "err");
-      if (status === "ok" || status === "healthy" || status === "up") {
-        healthDot.classList.add("ok");
-        healthText.textContent = "healthy";
-      } else if (status === "degraded" || status === "warn") {
-        healthDot.classList.add("warn");
-        healthText.textContent = status;
-      } else {
-        healthDot.classList.add("err");
-        healthText.textContent = status;
-      }
-      const llm = data.llm_status || (data.components && data.components.llm);
-      if (llm && /unavail|down|error|missing/i.test(String(llm))) {
-        healthDot.classList.remove("ok");
-        healthDot.classList.add("warn");
-        healthText.textContent = "llm " + llm;
-      }
-    } catch (err) {
-      healthDot.classList.add("err");
-      healthText.textContent = "offline";
-    }
-  }
-
   async function askOnce(question) {
     const res = await fetch("/api/v1/queries/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: question, stream: false, show_sources: true }),
+      body: JSON.stringify({
+        question: question,
+        stream: false,
+        show_sources: true,
+      }),
       signal: abortController ? abortController.signal : undefined,
     });
     const data = await res.json().catch(function () {
@@ -295,27 +248,30 @@
     const res = await fetch("/api/v1/queries/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: question, stream: true, show_sources: true }),
+      body: JSON.stringify({
+        question: question,
+        stream: true,
+        show_sources: true,
+      }),
       signal: abortController ? abortController.signal : undefined,
     });
     if (!res.ok) {
       const errData = await res.json().catch(function () {
         return {};
       });
-      throw new Error(errData.detail || errData.message || "stream failed " + res.status);
+      throw new Error(
+        errData.detail || errData.message || "stream failed " + res.status
+      );
     }
     if (!res.body || !res.body.getReader) {
-      const data = await res.json();
-      onFinal(data);
+      onFinal(await res.json());
       return;
     }
-
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let full = "";
     let finalPayload = null;
-
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -323,133 +279,169 @@
       const parts = buffer.split("\n");
       buffer = parts.pop() || "";
       for (let i = 0; i < parts.length; i++) {
-        const line = parts[i].trim();
+        let line = parts[i].trim();
         if (!line) continue;
-        let payload = line;
-        if (payload.startsWith("data:")) payload = payload.slice(5).trim();
-        if (!payload || payload === "[DONE]") continue;
+        if (line.startsWith("data:")) line = line.slice(5).trim();
+        if (!line || line === "[DONE]") continue;
         try {
-          const obj = JSON.parse(payload);
+          const obj = JSON.parse(line);
           if (obj.type === "token" || obj.delta || obj.token) {
-            const t = obj.token || obj.delta || obj.content || "";
-            full += t;
+            full += obj.token || obj.delta || obj.content || "";
             onDelta(full);
-          } else if (obj.type === "final" || obj.answer || obj.retrieved_chunks) {
+          } else if (obj.answer || obj.retrieved_chunks || obj.type === "final") {
             finalPayload = obj.data || obj;
             if (obj.answer) finalPayload = obj;
-          } else if (obj.answer) {
-            finalPayload = obj;
           }
         } catch (_e) {
-          full += payload;
+          full += line;
           onDelta(full);
         }
       }
     }
-
-    if (finalPayload) {
-      onFinal(finalPayload);
-    } else {
-      onFinal({ answer: full, retrieved_chunks: [] });
-    }
+    onFinal(finalPayload || { answer: full, retrieved_chunks: [] });
   }
 
   async function handleAsk(question) {
     const q = String(question || "").trim();
-    if (!q || busy) return;
-
-    setBusy(true);
+    if (!q || isLoading) return;
+    if (!selectedPdf) {
+      showError("Pick a PDF!");
+      return;
+    }
+    showError("");
+    setLoading(true);
     abortController = new AbortController();
     appendMessage("user", escapeHtml(q));
-    const assistantRow = appendMessage(
-      "assistant",
-      "正在检索条款并生成带引用答案…",
-      "is-pending"
-    );
+    const assistantRow = appendMessage("assistant", "…", "is-pending");
 
     try {
       if (streamToggle && streamToggle.checked) {
         await askStream(
           q,
           function (partial) {
-            setAssistantContent(assistantRow, formatAnswerHtml(partial), []);
-            assistantRow.classList.add("is-pending");
+            setAssistantBody(assistantRow, formatAnswerHtml(partial), []);
           },
           function (data) {
-            const answer = data.answer || data.response || "";
-            setAssistantContent(
+            setAssistantBody(
               assistantRow,
-              formatAnswerHtml(answer),
+              formatAnswerHtml(data.answer || data.response || ""),
               normalizeSources(data)
             );
           }
         );
       } else {
         const data = await askOnce(q);
-        const answer = data.answer || data.response || "(空响应)";
-        setAssistantContent(
+        setAssistantBody(
           assistantRow,
-          formatAnswerHtml(answer),
+          formatAnswerHtml(data.answer || data.response || "(empty)"),
           normalizeSources(data)
         );
       }
     } catch (err) {
       if (err.name === "AbortError") {
-        setAssistantContent(assistantRow, "已取消。", []);
+        setAssistantBody(assistantRow, "Stopped.", []);
       } else {
-        setAssistantContent(
+        showError(err.message || String(err));
+        setAssistantBody(
           assistantRow,
-          '<span style="color:#991b1b">请求失败：' +
+          '<span style="color:#dc2626">' +
             escapeHtml(err.message || String(err)) +
             "</span>",
           []
         );
       }
     } finally {
-      setBusy(false);
+      setLoading(false);
       abortController = null;
       input.value = "";
-      autoGrow();
       input.focus();
+      sendBtn.disabled = true;
     }
   }
 
-  function bindPromptCards() {
-    document.querySelectorAll(".prompt-card").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        const q = btn.getAttribute("data-q") || btn.textContent;
-        handleAsk(q);
-      });
-    });
+  function resetChat() {
+    if (abortController) abortController.abort();
+    setLoading(false);
+    showError("");
+    messagesEl.innerHTML = "";
+    messagesEl.hidden = true;
+    emptyChat.hidden = false;
+    input.value = "";
+    sendBtn.disabled = true;
+    input.focus();
   }
+
+  // events
+  pdfSelect.addEventListener("change", function () {
+    selectPdf(pdfSelect.value);
+  });
 
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     handleAsk(input.value);
   });
 
-  input.addEventListener("input", autoGrow);
+  input.addEventListener("input", function () {
+    sendBtn.disabled = isLoading || !String(input.value || "").trim();
+  });
+
   input.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleAsk(input.value);
+      if (String(input.value || "").trim()) handleAsk(input.value);
     }
   });
 
-  function resetChat() {
+  resetBtn.addEventListener("click", function (e) {
+    e.preventDefault();
+    resetChat();
+  });
+
+  stopBtn.addEventListener("click", function (e) {
+    e.preventDefault();
     if (abortController) abortController.abort();
-    setBusy(false);
-    showEmpty();
-    input.value = "";
-    autoGrow();
-    input.focus();
-  }
+  });
 
-  if (clearBtn) clearBtn.addEventListener("click", resetChat);
-  if (resetBtn) resetBtn.addEventListener("click", resetChat);
+  document.querySelectorAll(".prompt-chip").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      handleAsk(btn.getAttribute("data-q") || btn.textContent);
+    });
+  });
 
-  bindPromptCards();
+  // Resizable handle (react-resizable-panels simplified port)
+  (function setupResize() {
+    let dragging = false;
+    resizeHandle.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      dragging = true;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    });
+    window.addEventListener("mouseup", function () {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    });
+    window.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      const rect = panelGroup.getBoundingClientRect();
+      const isVertical = window.innerWidth <= 725;
+      if (isVertical) {
+        const y = e.clientY - rect.top;
+        const ratio = Math.min(0.8, Math.max(0.2, y / rect.height));
+        pdfPanel.style.flex = "0 0 " + ratio * 100 + "%";
+        aiPanel.style.flex = "0 0 " + (1 - ratio) * 100 + "%";
+      } else {
+        const x = e.clientX - rect.left;
+        const ratio = Math.min(0.8, Math.max(0.2, x / rect.width));
+        pdfPanel.style.flex = "0 0 " + ratio * 100 + "%";
+        aiPanel.style.flex = "1 1 " + (1 - ratio) * 100 + "%";
+      }
+    });
+  })();
+
   loadCorpus();
   loadHealth();
-  autoGrow();
+  sendBtn.disabled = true;
 })();
