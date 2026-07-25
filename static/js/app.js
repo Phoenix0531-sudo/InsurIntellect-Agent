@@ -1,12 +1,14 @@
-/* Chat shell behavior adapted from trangiabach/chat-pdf components:
- * ChatPanel / ChatPdfPicker / ChatPdfViewer / ChatAIWindow / ChatAIInput / ChatMessages
- * Data: our /api/v1/corpus + POST /api/v1/queries/ask (not their Next API routes).
- * HTML injection uses escapeHtml for untrusted answer/source text.
+/* Citation-first clause RAG UI on chat-pdf dual-pane shell.
+ * Product flow: ask → answer + sources → left pane opens cited PDF.
+ * Untrusted answer/source text always goes through escapeHtml before innerHTML.
  */
 (function () {
   const pdfSelect = document.getElementById("pdfSelect");
   const pdfEmpty = document.getElementById("pdfEmpty");
   const pdfFrame = document.getElementById("pdfFrame");
+  const pdfTitle = document.getElementById("pdfTitle");
+  const pdfSubtitle = document.getElementById("pdfSubtitle");
+  const pageBadge = document.getElementById("pageBadge");
   const corpusMeta = document.getElementById("corpusMeta");
   const messagesEl = document.getElementById("messages");
   const emptyChat = document.getElementById("emptyChat");
@@ -25,9 +27,11 @@
   const resizeHandle = document.getElementById("resizeHandle");
 
   let pdfs = [];
-  let selectedPdf = null;
+  let activeSources = [];
+  let currentView = { name: null, url: null, page: null };
   let isLoading = false;
   let abortController = null;
+  let citeSeq = 0;
 
   function escapeHtml(s) {
     return String(s ?? "")
@@ -37,12 +41,113 @@
       .replace(/"/g, "&quot;");
   }
 
+  function basename(name) {
+    const s = String(name || "");
+    const parts = s.replace(/\\/g, "/").split("/");
+    return parts[parts.length - 1] || s;
+  }
+
+  function resolvePdfByName(docName) {
+    if (!docName) return null;
+    const bare = basename(docName).toLowerCase();
+    return (
+      pdfs.find(function (p) {
+        return basename(p.name).toLowerCase() === bare;
+      }) ||
+      pdfs.find(function (p) {
+        return basename(p.name).toLowerCase().includes(bare) || bare.includes(basename(p.name).toLowerCase());
+      }) ||
+      null
+    );
+  }
+
+  function openCitedPdf(docName, pageNumber, opts) {
+    opts = opts || {};
+    const hit = resolvePdfByName(docName);
+    if (!hit || !hit.url) {
+      if (opts.forceEmpty) {
+        pdfFrame.hidden = true;
+        pdfFrame.removeAttribute("src");
+        pdfEmpty.hidden = false;
+        pdfSelect.hidden = true;
+        pageBadge.hidden = true;
+        pdfTitle.textContent = "引用原文";
+        pdfSubtitle.textContent = "暂未匹配到可打开的条款 PDF";
+      }
+      return false;
+    }
+
+    const page =
+      pageNumber != null && pageNumber !== "" && !Number.isNaN(Number(pageNumber))
+        ? Number(pageNumber)
+        : null;
+
+    // Always rebuild src so #page=N reloads even for same file.
+    const hash = page && page > 0 ? "#page=" + page : "";
+    const nextSrc = hit.url + hash;
+    pdfEmpty.hidden = true;
+    pdfFrame.hidden = false;
+    if (pdfFrame.getAttribute("src") !== nextSrc) {
+      pdfFrame.src = nextSrc;
+    }
+
+    currentView = { name: hit.name, url: hit.url, page: page };
+    pdfTitle.textContent = basename(hit.name);
+    pdfSubtitle.textContent = page
+      ? "当前定位到引用页 p." + page
+      : "答案引用的条款原文";
+    if (page) {
+      pageBadge.hidden = false;
+      pageBadge.textContent = "p." + page;
+    } else {
+      pageBadge.hidden = true;
+      pageBadge.textContent = "";
+    }
+
+    // Optional switcher among corpus docs (manual override, not a gate)
+    if (pdfs.length) {
+      pdfSelect.hidden = false;
+      pdfSelect.innerHTML = pdfs
+        .map(function (p) {
+          const sel = p.url === hit.url ? " selected" : "";
+          return (
+            '<option value="' +
+            escapeHtml(p.url) +
+            '"' +
+            sel +
+            ">" +
+            escapeHtml(basename(p.name)) +
+            "</option>"
+          );
+        })
+        .join("");
+    }
+    return true;
+  }
+
+  function followTopCitation(sources) {
+    activeSources = Array.isArray(sources) ? sources : [];
+    if (!activeSources.length) {
+      pdfTitle.textContent = "引用原文";
+      pdfSubtitle.textContent = "本次回答没有可用引用";
+      return;
+    }
+    const top = activeSources[0];
+    openCitedPdf(
+      top.document_name || top.source || top.filename,
+      top.page_number ?? top.page,
+      {}
+    );
+  }
+
   function setLoading(v) {
     isLoading = v;
     sendBtn.disabled = v || !String(input.value || "").trim();
     if (genPill) genPill.hidden = !v;
     if (stopBtn) stopBtn.hidden = !v;
-    const lastIcon = messagesEl.querySelector(".message.is-assistant:last-child .message-icon");
+    const lastIcon = messagesEl.querySelector(
+      ".message.is-assistant:last-child .message-icon"
+    );
     if (lastIcon) lastIcon.classList.toggle("spin", v);
   }
 
@@ -57,23 +162,6 @@
     errPill.textContent = "Error: " + msg;
   }
 
-  function selectPdf(url) {
-    selectedPdf = pdfs.find(function (p) {
-      return p.url === url;
-    }) || null;
-    if (selectedPdf && selectedPdf.url) {
-      pdfEmpty.hidden = true;
-      pdfFrame.hidden = false;
-      pdfFrame.src = selectedPdf.url;
-      pdfSelect.value = selectedPdf.url;
-    } else {
-      pdfFrame.hidden = true;
-      pdfFrame.removeAttribute("src");
-      pdfEmpty.hidden = false;
-      pdfSelect.value = "";
-    }
-  }
-
   async function loadCorpus() {
     try {
       const res = await fetch("/api/v1/corpus");
@@ -85,36 +173,15 @@
           const name = d.name || d.document_name || d.filename || "document.pdf";
           let url = d.url;
           if (!url && name) url = "/samples/" + encodeURIComponent(name);
-          return {
-            name: name,
-            url: url,
-            chunk_count: d.chunk_count ?? d.chunks,
-          };
+          return { name: name, url: url, pages: d.pages };
         })
         .filter(function (p) {
           return !!p.url;
         });
 
-      pdfSelect.innerHTML =
-        '<option value="">Pick a PDF file...</option>' +
-        pdfs
-          .map(function (p) {
-            return (
-              '<option value="' +
-              escapeHtml(p.url) +
-              '">' +
-              escapeHtml(p.name) +
-              "</option>"
-            );
-          })
-          .join("");
-
       const chunks = data.chunk_count != null ? data.chunk_count : "—";
-      corpusMeta.textContent = pdfs.length + " PDFs · " + chunks + " chunks";
-
-      if (pdfs.length) {
-        selectPdf(pdfs[0].url);
-      }
+      corpusMeta.textContent = pdfs.length + " docs · " + chunks + " chunks";
+      // Do NOT auto-open a PDF. Left pane waits for citations.
     } catch (err) {
       corpusMeta.textContent = "corpus error";
       showError(err.message || String(err));
@@ -126,8 +193,7 @@
       const res = await fetch("/api/v1/health/");
       if (!res.ok) throw new Error("health " + res.status);
       const data = await res.json();
-      const status = (data.status || "ok").toLowerCase();
-      healthText.textContent = status;
+      healthText.textContent = (data.status || "ok").toLowerCase();
     } catch (_e) {
       healthText.textContent = "offline";
     }
@@ -142,26 +208,41 @@
           return '<span class="sec-head">' + head + (rest || "") + "</span>";
         }
       )
-      .replace(/\[(\d+)\]/g, '<a class="cite-ref" href="#cite-$1">[$1]</a>');
+      .replace(/\[(\d+)\]/g, function (_m, n) {
+        return (
+          '<button type="button" class="cite-ref" data-cite-index="' +
+          n +
+          '" title="打开引用 [' +
+          n +
+          ']">[' +
+          n +
+          "]</button>"
+        );
+      });
   }
 
-  function citationsHtml(sources) {
+  function citationsHtml(sources, groupId) {
     if (!sources || !sources.length) return "";
     const cards = sources
       .map(function (s, i) {
         const name = s.document_name || s.source || s.filename || "doc";
         const page = s.page_number ?? s.page ?? "—";
-        const excerpt = String(s.content || s.excerpt || s.text || "").slice(0, 220);
+        const excerpt = String(s.content || s.excerpt || s.text || "").slice(
+          0,
+          220
+        );
         return (
-          '<div class="cite-card" id="cite-' +
+          '<button type="button" class="cite-card" data-cite-index="' +
           (i + 1) +
+          '" data-cite-group="' +
+          groupId +
           '">' +
           '<div class="cite-card-top">' +
           '<span class="cite-idx">[' +
           (i + 1) +
           "]</span>" +
           '<span class="cite-doc">' +
-          escapeHtml(name) +
+          escapeHtml(basename(name)) +
           "</span>" +
           '<span class="cite-page">p.' +
           escapeHtml(String(page)) +
@@ -169,21 +250,25 @@
           "</div>" +
           '<div class="cite-excerpt">' +
           escapeHtml(excerpt) +
-          "</div></div>"
+          "</div></button>"
         );
       })
       .join("");
     return (
-      '<div class="citations"><div class="citations-title">Sources · ' +
+      '<div class="citations" data-cite-group="' +
+      groupId +
+      '"><div class="citations-title">Sources · ' +
       sources.length +
-      "</div>" +
+      " · 点击打开左侧原文</div>" +
       cards +
       "</div>"
     );
   }
 
   function ensureMessagesVisible() {
+    // hard hide welcome so flex layout cannot keep it on screen
     emptyChat.hidden = true;
+    emptyChat.setAttribute("aria-hidden", "true");
     messagesEl.hidden = false;
   }
 
@@ -194,8 +279,9 @@
       "message is-" + role + (extraClass ? " " + extraClass : "");
     const icon =
       role === "user"
-        ? '<svg class="message-icon" viewBox="0 0 24 24" width="20" height="20" fill="#1D9CFF"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/></svg>'
-        : '<svg class="message-icon" viewBox="0 0 24 24" width="20" height="20" fill="#1D9CFF"><path d="M12 2l1.2 3.6L17 7l-3.8 1.2L12 12l-1.2-3.8L7 7l3.8-1.4L12 2zm6.5 9l.8 2.3 2.2.7-2.2.7-.8 2.3-.8-2.3-2.2-.7 2.2-.7.8-2.3z"/></svg>';
+        ? '<svg class="message-icon" viewBox="0 0 24 24" width="18" height="18" fill="#1D9CFF"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/></svg>'
+        : '<svg class="message-icon" viewBox="0 0 24 24" width="18" height="18" fill="#1D9CFF"><path d="M12 2l1.2 3.6L17 7l-3.8 1.2L12 12l-1.2-3.8L7 7l3.8-1.4L12 2zm6.5 9l.8 2.3 2.2.7-2.2.7-.8 2.3-.8-2.3-2.2-.7 2.2-.7.8-2.3z"/></svg>';
+    // Safe: icon is fixed SVG; html is pre-escaped or composed from escaped parts.
     div.innerHTML =
       '<div class="message-row">' +
       icon +
@@ -210,8 +296,42 @@
   function setAssistantBody(row, answerHtml, sources) {
     const body = row.querySelector(".message-body");
     if (!body) return;
-    body.innerHTML = answerHtml + citationsHtml(sources || []);
+    citeSeq += 1;
+    const groupId = "g" + citeSeq;
+    row.dataset.citeGroup = groupId;
+    row._sources = sources || [];
+    body.innerHTML = answerHtml + citationsHtml(sources || [], groupId);
     messagesEl.scrollTop = messagesEl.scrollHeight;
+    followTopCitation(sources || []);
+    highlightActiveCite(groupId, 1);
+  }
+
+  function highlightActiveCite(groupId, index) {
+    document.querySelectorAll(".cite-card.is-active").forEach(function (el) {
+      el.classList.remove("is-active");
+    });
+    if (!groupId || !index) return;
+    const card = document.querySelector(
+      '.cite-card[data-cite-group="' +
+        groupId +
+        '"][data-cite-index="' +
+        index +
+        '"]'
+    );
+    if (card) card.classList.add("is-active");
+  }
+
+  function activateCitation(index, sources, groupId) {
+    const list = sources || activeSources || [];
+    const i = Number(index) - 1;
+    if (i < 0 || i >= list.length) return;
+    const s = list[i];
+    openCitedPdf(
+      s.document_name || s.source || s.filename,
+      s.page_number ?? s.page,
+      {}
+    );
+    highlightActiveCite(groupId, index);
   }
 
   function normalizeSources(data) {
@@ -288,7 +408,11 @@
           if (obj.type === "token" || obj.delta || obj.token) {
             full += obj.token || obj.delta || obj.content || "";
             onDelta(full);
-          } else if (obj.answer || obj.retrieved_chunks || obj.type === "final") {
+          } else if (
+            obj.answer ||
+            obj.retrieved_chunks ||
+            obj.type === "final"
+          ) {
             finalPayload = obj.data || obj;
             if (obj.answer) finalPayload = obj;
           }
@@ -304,13 +428,11 @@
   async function handleAsk(question) {
     const q = String(question || "").trim();
     if (!q || isLoading) return;
-    if (!selectedPdf) {
-      showError("Pick a PDF!");
-      return;
-    }
+    // No PDF gate — corpus is whole-index hybrid retrieve.
     showError("");
     setLoading(true);
     abortController = new AbortController();
+    ensureMessagesVisible();
     appendMessage("user", escapeHtml(q));
     const assistantRow = appendMessage("assistant", "…", "is-pending");
 
@@ -319,7 +441,8 @@
         await askStream(
           q,
           function (partial) {
-            setAssistantBody(assistantRow, formatAnswerHtml(partial), []);
+            const body = assistantRow.querySelector(".message-body");
+            if (body) body.innerHTML = formatAnswerHtml(partial);
           },
           function (data) {
             setAssistantBody(
@@ -366,14 +489,42 @@
     messagesEl.innerHTML = "";
     messagesEl.hidden = true;
     emptyChat.hidden = false;
+    emptyChat.removeAttribute("aria-hidden");
+    activeSources = [];
+    currentView = { name: null, url: null, page: null };
+    pdfFrame.hidden = true;
+    pdfFrame.removeAttribute("src");
+    pdfEmpty.hidden = false;
+    pdfSelect.hidden = true;
+    pageBadge.hidden = true;
+    pdfTitle.textContent = "引用原文";
+    pdfSubtitle.textContent = "提问后自动打开答案引用的条款 PDF";
     input.value = "";
     sendBtn.disabled = true;
     input.focus();
   }
 
-  // events
+  // Citation clicks (event delegation)
+  messagesEl.addEventListener("click", function (e) {
+    const ref = e.target.closest(".cite-ref, .cite-card");
+    if (!ref) return;
+    e.preventDefault();
+    const idx = ref.getAttribute("data-cite-index");
+    const groupId =
+      ref.getAttribute("data-cite-group") ||
+      (ref.closest(".message") && ref.closest(".message").dataset.citeGroup);
+    const row = ref.closest(".message");
+    const sources = (row && row._sources) || activeSources;
+    activateCitation(idx, sources, groupId);
+  });
+
   pdfSelect.addEventListener("change", function () {
-    selectPdf(pdfSelect.value);
+    const url = pdfSelect.value;
+    const hit = pdfs.find(function (p) {
+      return p.url === url;
+    });
+    if (!hit) return;
+    openCitedPdf(hit.name, currentView.page || null, {});
   });
 
   form.addEventListener("submit", function (e) {
@@ -408,13 +559,13 @@
     });
   });
 
-  // Resizable handle (react-resizable-panels simplified port)
   (function setupResize() {
     let dragging = false;
     resizeHandle.addEventListener("mousedown", function (e) {
       e.preventDefault();
       dragging = true;
-      document.body.style.cursor = "col-resize";
+      document.body.style.cursor =
+        window.innerWidth <= 860 ? "row-resize" : "col-resize";
       document.body.style.userSelect = "none";
     });
     window.addEventListener("mouseup", function () {
@@ -426,15 +577,15 @@
     window.addEventListener("mousemove", function (e) {
       if (!dragging) return;
       const rect = panelGroup.getBoundingClientRect();
-      const isVertical = window.innerWidth <= 725;
+      const isVertical = window.innerWidth <= 860;
       if (isVertical) {
         const y = e.clientY - rect.top;
-        const ratio = Math.min(0.8, Math.max(0.2, y / rect.height));
+        const ratio = Math.min(0.78, Math.max(0.22, y / rect.height));
         pdfPanel.style.flex = "0 0 " + ratio * 100 + "%";
         aiPanel.style.flex = "0 0 " + (1 - ratio) * 100 + "%";
       } else {
         const x = e.clientX - rect.left;
-        const ratio = Math.min(0.8, Math.max(0.2, x / rect.width));
+        const ratio = Math.min(0.72, Math.max(0.28, x / rect.width));
         pdfPanel.style.flex = "0 0 " + ratio * 100 + "%";
         aiPanel.style.flex = "1 1 " + (1 - ratio) * 100 + "%";
       }
