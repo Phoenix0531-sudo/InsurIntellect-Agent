@@ -4,9 +4,34 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
+<!-- 状态 -->
 [![CI](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent?color=brightgreen)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Last commit](https://img.shields.io/github/last-commit/Phoenix0531-sudo/InsurIntellect-Agent)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/commits/master)
+
+<!-- 仓库统计（对齐 FinRobot 徽章密度） -->
+[![Stars](https://img.shields.io/github/stars/Phoenix0531-sudo/InsurIntellect-Agent?style=flat)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/stargazers)
+[![Forks](https://img.shields.io/github/forks/Phoenix0531-sudo/InsurIntellect-Agent?style=flat)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/network/members)
+[![Issues](https://img.shields.io/github/issues-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Issues)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/issues)
+[![Closed Issues](https://img.shields.io/github/issues-closed-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Closed%20Issues)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/issues?q=is%3Aissue+is%3Aclosed)
+[![Open PRs](https://img.shields.io/github/issues-pr-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Open%20PRs)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/pulls)
+[![Closed PRs](https://img.shields.io/github/issues-pr-closed-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Closed%20PRs)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/pulls?q=is%3Apr+is%3Aclosed)
+[![Code size](https://img.shields.io/github/languages/code-size/Phoenix0531-sudo/InsurIntellect-Agent)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent)
+[![Top language](https://img.shields.io/github/languages/top/Phoenix0531-sudo/InsurIntellect-Agent)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent)
+
+<!-- 产品 / 栈（诚实静态徽章 — 不造假 PyPI / Discord） -->
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
+[![Chroma](https://img.shields.io/badge/vector-Chroma-FF6F61.svg)](https://www.trychroma.com/)
+[![BM25](https://img.shields.io/badge/lexical-BM25%2Bjieba-6C63FF.svg)](#架构)
+[![Embedding](https://img.shields.io/badge/embed-BGE%20small%20zh-orange.svg)](#提供商说明)
+[![Threshold](https://img.shields.io/badge/SIMILARITY__THRESHOLD-0.32-informational.svg)](#提供商说明)
+[![Port](https://img.shields.io/badge/demo-127.0.0.1%3A8766-0ea5e9.svg)](#快速开始)
+[![Mode](https://img.shields.io/badge/SIMPLE__RAG-default-success.svg)](#架构)
+[![UI](https://img.shields.io/badge/UI-static%20HTML%2FCSS%2FJS-lightgrey.svg)](#预览)
+[![Not advice](https://img.shields.io/badge/Not%20regulated%20insurance%20advice-critical.svg)](#免责声明)
+
+![Visitors](https://api.visitorbadge.io/api/VisitorHit?user=Phoenix0531-sudo&repo=InsurIntellect-Agent&countColor=%231D9CFF)
 
 InsurIntellect 是面向作品集的 **金融垂直智能体演示**：对保险条款 / 保单类 PDF 做本地问答。
 
@@ -17,7 +42,37 @@ InsurIntellect 是面向作品集的 **金融垂直智能体演示**：对保险
 
 它 **不是** 多租户 SaaS，**不是** Agent 画布平台，**不构成受监管保险建议（Not regulated insurance advice）**。
 
-产品叙事对齐金融智能体同侪 [FinRobot](https://github.com/AI4Finance-Foundation/FinRobot)（智能体 + 证据溯源）；证据 UI 采用轻量 RAGFlow 式「知识库 + 引用」布局，而非通用 PDF 聊天 SaaS。
+产品叙事对齐金融智能体同侪 [FinRobot](https://github.com/AI4Finance-Foundation/FinRobot)（智能体 + 证据溯源）。证据 UI 采用轻量 RAGFlow 式「知识库 + 引用」布局。免责语气参考 [FinGPT](https://github.com/AI4Finance-Foundation/FinGPT)。
+
+---
+
+## 目录
+
+- [为什么做 InsurIntellect](#为什么做-insurintellect)
+- [设计原则](#设计原则)
+- [预览](#预览)
+- [架构](#架构)
+- [核心能力](#核心能力)
+- [技术栈](#技术栈)
+- [快速开始](#快速开始)
+- [固定演示问题](#固定演示问题)
+- [API](#api)
+- [主路径目录](#主路径目录)
+- [测试与 CI](#测试与-ci)
+- [范围](#范围)
+- [提供商说明](#提供商说明)
+- [免责声明](#免责声明)
+- [许可](#许可)
+- [相关阅读](#相关阅读仅结构灵感)
+
+---
+
+## 为什么做 InsurIntellect
+
+1. **保险文本高风险。** 通用聊天会编造等待期与责任免除。本演示 **用检索门闩约束回答**，有答则展示 **文档 / 页码 / 摘录**。
+2. **溯源优先于花活。** 对齐 FinRobot「数字由代码算、叙述由 LLM 写」：这里是 **条款由检索给出、叙述由 LLM 辅助、证据不足就拒答**。
+3. **作品集诚实范围。** 只做一条垂直主路径（本地 PDF → hybrid 检索 → 带引用回答 / 拒答）。不做假多租户 SaaS，不做股权研究多 Agent 套壳，不做「保证获赔」机器人。
+4. **可复现演示。** 公开合成样例、`run_demo` 强制 BGE + 阈值、固定 smoke（Q1/Q2/Q3/天气）、CI 不依赖在线 LLM Key。
 
 ---
 
@@ -55,7 +110,7 @@ InsurIntellect 是面向作品集的 **金融垂直智能体演示**：对保险
 
 左栏：产品名、已索引文档、示例问题、免责。  
 右栏：对话、结构化答案、引用卡（文档名 / 页码 / 摘录）。  
-UI 壳为静态 HTML/CSS/JS（ChatPDF 式双栏）；产品故事是保险条款 RAG，不是通用 PDF Chat。
+UI 壳为静态 HTML/CSS/JS（ChatPDF 式双栏，主色 `#1D9CFF`）；产品故事是保险条款 RAG，不是通用 PDF Chat。
 
 ---
 
@@ -96,12 +151,30 @@ samples/*.pdf  ──生成──►  data/documents/pdfs
 
 ## 核心能力
 
-- **条款语料优先** — 仓库仅含公开假样例 PDF，不提交真实客户保单
-- **混合检索** — Chroma + BM25/jieba；默认嵌入 `hf:BAAI/bge-small-zh-v1.5`（`SIMILARITY_THRESHOLD=0.32`）
-- **带引用回答** — 结论 / 条款依据 / 边界 + 一行免责
-- **诚实拒答** — 天气、购保建议、「保证获赔」→ 边界，不当闲聊
-- **证据 UI** — 双栏、引用卡、可点 `[n]`、状态 pill、自托管字体 / PDF.js 资源
-- **本地优先** — `uv` + 端口 **8766**；OpenAI 兼容网关（如本机 new-api）
+| 能力 | 说明 |
+|------|------|
+| 条款语料优先 | 仓库仅公开假样例 PDF，不提交真实客户保单 |
+| 混合检索 | Chroma + BM25/jieba；默认嵌入 `hf:BAAI/bge-small-zh-v1.5` |
+| 分数门闩 | BGE 下 `SIMILARITY_THRESHOLD=0.32`（demo 脚本强制） |
+| 带引用回答 | 结论 / 条款依据 / 边界 + 一行免责 |
+| 诚实拒答 | 天气、购保建议、「保证获赔」→ 边界，不当闲聊 |
+| 对外引用策略 | answer 保留真实得分；refuse/advice → `[]` |
+| 证据 UI | 双栏、引用卡、可点 `[n]`、状态 pill |
+| 本地优先 | `uv` + **127.0.0.1:8766**；OpenAI 兼容网关 |
+
+---
+
+## 技术栈
+
+| 层 | 选型 |
+|----|------|
+| API | FastAPI + Uvicorn |
+| 检索 | Chroma + BM25/jieba hybrid |
+| 嵌入 | 本机 HF `BAAI/bge-small-zh-v1.5`（或离线 `local:hash`） |
+| LLM | OpenAI 兼容（`OPENAI_BASE_URL`） |
+| UI | 静态 HTML / CSS / JS（`static/js/app.js`） |
+| 测试 | pytest + ruff critical（CI） |
+| 演示 | `scripts/run_demo.sh` / `.bat` + `demo_smoke.py` |
 
 ---
 
@@ -197,6 +270,14 @@ OpenAPI（`DEBUG=true` 时）：**http://127.0.0.1:8766/docs**
 
 流式：同一 `POST` 且 `"stream": true`（SSE）；终态事件与非流式同一套引用策略。
 
+示例：
+
+```bash
+curl -s http://127.0.0.1:8766/api/v1/queries/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"等待期是多久？","stream":false}'
+```
+
 ---
 
 ## 主路径目录
@@ -236,6 +317,8 @@ uv run pytest -q tests
 ```
 
 GitHub Actions 跑同一套 critical ruff + `pytest tests/`，**不要求** 在线 LLM 或嵌入 API Key。
+
+工作流： [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 
 ---
 
@@ -284,5 +367,5 @@ MIT，见 [LICENSE](LICENSE)。
 ## 相关阅读（仅结构灵感）
 
 - [FinRobot](https://github.com/AI4Finance-Foundation/FinRobot) — 金融 AI Agent 平台；溯源 / 智能体产品叙事（本 README 主骨架）
-- [FinGPT](https://github.com/AI4Finance-Foundation/FinGPT) — 开源金融 LLM 生态；免责与 Why 写法
+- [FinGPT](https://github.com/AI4Finance-Foundation/FinGPT) — 开源金融 LLM 生态；Why + 免责写法
 - [RAGFlow](https://github.com/infiniflow/ragflow) — 通用 RAG 引擎；知识库 + 引用产品形态（非保险垂直）

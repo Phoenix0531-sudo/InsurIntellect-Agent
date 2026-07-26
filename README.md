@@ -4,9 +4,34 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
+<!-- Status -->
 [![CI](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent?color=brightgreen)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Last commit](https://img.shields.io/github/last-commit/Phoenix0531-sudo/InsurIntellect-Agent)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/commits/master)
+
+<!-- Repo stats (FinRobot-style density) -->
+[![Stars](https://img.shields.io/github/stars/Phoenix0531-sudo/InsurIntellect-Agent?style=flat)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/stargazers)
+[![Forks](https://img.shields.io/github/forks/Phoenix0531-sudo/InsurIntellect-Agent?style=flat)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/network/members)
+[![Issues](https://img.shields.io/github/issues-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Issues)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/issues)
+[![Closed Issues](https://img.shields.io/github/issues-closed-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Closed%20Issues)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/issues?q=is%3Aissue+is%3Aclosed)
+[![Open PRs](https://img.shields.io/github/issues-pr-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Open%20PRs)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/pulls)
+[![Closed PRs](https://img.shields.io/github/issues-pr-closed-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Closed%20PRs)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/pulls?q=is%3Apr+is%3Aclosed)
+[![Code size](https://img.shields.io/github/languages/code-size/Phoenix0531-sudo/InsurIntellect-Agent)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent)
+[![Top language](https://img.shields.io/github/languages/top/Phoenix0531-sudo/InsurIntellect-Agent)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent)
+
+<!-- Product / stack (honest static badges — no fake PyPI / Discord) -->
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
+[![Chroma](https://img.shields.io/badge/vector-Chroma-FF6F61.svg)](https://www.trychroma.com/)
+[![BM25](https://img.shields.io/badge/lexical-BM25%2Bjieba-6C63FF.svg)](#architecture)
+[![Embedding](https://img.shields.io/badge/embed-BGE%20small%20zh-orange.svg)](#provider-notes)
+[![Threshold](https://img.shields.io/badge/SIMILARITY__THRESHOLD-0.32-informational.svg)](#provider-notes)
+[![Port](https://img.shields.io/badge/demo-127.0.0.1%3A8766-0ea5e9.svg)](#quickstart)
+[![Mode](https://img.shields.io/badge/SIMPLE__RAG-default-success.svg)](#architecture)
+[![UI](https://img.shields.io/badge/UI-static%20HTML%2FCSS%2FJS-lightgrey.svg)](#preview)
+[![Not advice](https://img.shields.io/badge/Not%20regulated%20insurance%20advice-critical.svg)](#disclaimer)
+
+![Visitors](https://api.visitorbadge.io/api/VisitorHit?user=Phoenix0531-sudo&repo=InsurIntellect-Agent&countColor=%231D9CFF)
 
 InsurIntellect is a **portfolio-ready financial agent demo** for insurance policy / clause PDFs:
 
@@ -17,7 +42,37 @@ InsurIntellect is a **portfolio-ready financial agent demo** for insurance polic
 
 It is **not** a multi-tenant SaaS, **not** an agent canvas platform, and **not regulated insurance advice**.
 
-Product narrative is aligned with financial-agent peers such as [FinRobot](https://github.com/AI4Finance-Foundation/FinRobot) (agent + provenance), while the evidence UI follows a lightweight RAGFlow-style knowledge-base + citations layout.
+Product narrative is aligned with financial-agent peers such as [FinRobot](https://github.com/AI4Finance-Foundation/FinRobot) (agent + provenance). Evidence UI follows a lightweight RAGFlow-style knowledge-base + citations layout. Disclaimer tone draws from [FinGPT](https://github.com/AI4Finance-Foundation/FinGPT).
+
+---
+
+## Table of contents
+
+- [Why InsurIntellect](#why-insurintellect)
+- [Design principle](#design-principle)
+- [Preview](#preview)
+- [Architecture](#architecture)
+- [Core capabilities](#core-capabilities)
+- [Tech stack](#tech-stack)
+- [Quickstart](#quickstart)
+- [Demo questions](#demo-questions)
+- [API](#api)
+- [Project layout](#project-layout-main-path)
+- [Tests and CI](#tests--ci)
+- [Scope](#scope)
+- [Provider notes](#provider-notes)
+- [Disclaimer](#disclaimer)
+- [License](#license)
+- [Related reading](#related-reading-structure-inspiration-only)
+
+---
+
+## Why InsurIntellect
+
+1. **Insurance text is high-stakes.** Generic chatbots invent waiting periods and exclusions. This demo **gates answers on retrieval** and shows **document / page / excerpt** when it answers.
+2. **Provenance over polish.** Like FinRobot’s “numbers are code-calculated; narratives are LLM-assisted,” here **clauses are retrieved; narration is LLM-assisted; refuse when evidence is weak**.
+3. **Portfolio-honest scope.** One vertical path (local PDF → hybrid retrieve → cited answer / refuse). No fake multi-tenant SaaS, no equity multi-agent cosplay, no “guaranteed payout” bot.
+4. **Reproducible demo.** Public synthetic samples, forced BGE + threshold in `run_demo`, fixed smoke cases (Q1/Q2/Q3/weather), CI without live LLM keys.
 
 ---
 
@@ -55,7 +110,7 @@ When evidence is weak, missing, or the user asks for regulated advice, the syste
 
 Left pane: product name, indexed documents, demo prompts, disclaimer.  
 Right pane: dialogue, structured answer, citation cards (document / page / excerpt).  
-UI shell is static HTML/CSS/JS (ChatPDF-like dual pane); product story is financial clause RAG, not generic PDF chat.
+UI shell is static HTML/CSS/JS (ChatPDF-like dual pane, accent `#1D9CFF`); product story is financial clause RAG, not generic PDF chat.
 
 ---
 
@@ -96,12 +151,30 @@ Off by default (advanced / optional code only): query rewriting, SQL routing, kn
 
 ## Core capabilities
 
-- **Clause corpus first** — public fake sample PDFs only; no real customer policies in-repo
-- **Hybrid retrieval** — Chroma + BM25/jieba; default embedding `hf:BAAI/bge-small-zh-v1.5` (`SIMILARITY_THRESHOLD=0.32`)
-- **Cited answers** — conclusion / clause basis / boundary + disclaimer line
-- **Honest refuse** — weather, purchase advice, “guaranteed payout” → boundary, not free chat
-- **Evidence UI** — dual pane, citation cards, clickable `[n]`, status pill, self-hosted fonts/PDF.js assets
-- **Local-first** — `uv` + port **8766**; OpenAI-compatible gateway (e.g. local new-api)
+| Capability | Detail |
+|------------|--------|
+| Clause corpus first | Public fake sample PDFs only; no real customer policies in-repo |
+| Hybrid retrieval | Chroma + BM25/jieba; default embed `hf:BAAI/bge-small-zh-v1.5` |
+| Score gate | `SIMILARITY_THRESHOLD=0.32` for BGE (demo scripts force this) |
+| Cited answers | Conclusion / clause basis / boundary + disclaimer line |
+| Honest refuse | Weather, purchase advice, “guaranteed payout” → boundary, not free chat |
+| Public citation policy | Answer keeps real scores; refuse/advice → `[]` |
+| Evidence UI | Dual pane, citation cards, clickable `[n]`, status pill |
+| Local-first | `uv` + **127.0.0.1:8766**; OpenAI-compatible gateway |
+
+---
+
+## Tech stack
+
+| Layer | Choice |
+|-------|--------|
+| API | FastAPI + Uvicorn |
+| Retrieve | Chroma + BM25/jieba hybrid |
+| Embed | Local HF `BAAI/bge-small-zh-v1.5` (or `local:hash` offline) |
+| LLM | OpenAI-compatible (`OPENAI_BASE_URL`) |
+| UI | Static HTML / CSS / JS (`static/js/app.js`) |
+| Tests | pytest + ruff critical rules (CI) |
+| Demo | `scripts/run_demo.sh` / `.bat` + `demo_smoke.py` |
 
 ---
 
@@ -197,6 +270,14 @@ Stable response fields include `question`, `answer`, `answer_kind`, `retrieved_c
 
 Streaming uses the same `POST` with `"stream": true` (SSE); final event carries the same citation policy as non-stream.
 
+Example:
+
+```bash
+curl -s http://127.0.0.1:8766/api/v1/queries/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"等待期是多久？","stream":false}'
+```
+
 ---
 
 ## Project layout (main path)
@@ -236,6 +317,8 @@ uv run pytest -q tests
 ```
 
 GitHub Actions runs the same critical ruff select set + `pytest tests/` **without** requiring a live LLM or embedding API key.
+
+Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 
 ---
 
@@ -283,6 +366,6 @@ MIT. See [LICENSE](LICENSE).
 
 ## Related reading (structure inspiration only)
 
-- [FinRobot](https://github.com/AI4Finance-Foundation/FinRobot) — financial AI agent platform; provenance / agent product narrative
-- [FinGPT](https://github.com/AI4Finance-Foundation/FinGPT) — open financial LLM ecosystem; disclaimer and “why” style
+- [FinRobot](https://github.com/AI4Finance-Foundation/FinRobot) — financial AI agent platform; provenance / agent product narrative (primary README skeleton)
+- [FinGPT](https://github.com/AI4Finance-Foundation/FinGPT) — open financial LLM ecosystem; Why + disclaimer style
 - [RAGFlow](https://github.com/infiniflow/ragflow) — general RAG engine; knowledge-base + citation product shape (not insurance-specific)
