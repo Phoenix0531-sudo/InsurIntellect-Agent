@@ -1,1208 +1,1204 @@
-// 全局变量
-let currentChatId = null;
-let chatHistory = [];
-let isLoading = false;
-let currentView = 'chat';
-// 流式控制
-let activeEventSource = null; // 兼容旧逻辑（EventSource）
-let activeStreamAbortController = null; // 新逻辑（POST + fetch 流式）
-let streamingInProgress = false;
-let streamRetryCount = 0;
-const MAX_STREAM_RETRIES = 1;
+/* Citation-first clause RAG UI on chat-pdf dual-pane shell.
+ * Product: ask → curated citations → left PDF + evidence strip.
+ * P1: stream end-only PDF/citations; refuse card styles.
+ * P2: PDF.js highlight, chip docs, chunk debug.
+ * P3: multi-turn left-pane stickiness.
+ * Untrusted answer/source text always goes through escapeHtml before innerHTML.
+ */
+(function () {
+  const pdfSelect = document.getElementById("pdfSelect");
+  const pdfEmpty = document.getElementById("pdfEmpty");
+  const pdfFrame = document.getElementById("pdfFrame");
+  const pdfJsView = document.getElementById("pdfJsView");
+  const pdfCanvas = document.getElementById("pdfCanvas");
+  const pdfTextLayer = document.getElementById("pdfTextLayer");
+  const pdfHighlightLayer = document.getElementById("pdfHighlightLayer");
+  const pdfTitle = document.getElementById("pdfTitle");
+  const pdfSubtitle = document.getElementById("pdfSubtitle");
+  const pageBadge = document.getElementById("pageBadge");
+  const evidenceStrip = document.getElementById("evidenceStrip");
+  const evidenceCite = document.getElementById("evidenceCite");
+  const evidenceExcerpt = document.getElementById("evidenceExcerpt");
+  const corpusMeta = document.getElementById("corpusMeta");
+  const embedMeta = document.getElementById("embedMeta");
+  const messagesEl = document.getElementById("messages");
+  const emptyChat = document.getElementById("emptyChat");
+  const form = document.getElementById("askForm");
+  const input = document.getElementById("messageInput");
+  const sendBtn = document.getElementById("sendBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const stopBtn = document.getElementById("stopBtn");
+  const debugToggle = document.getElementById("debugToggle");
+  const streamToggle = document.getElementById("streamToggle");
+  const genPill = document.getElementById("genPill");
+  const errPill = document.getElementById("errPill");
+  const healthText = document.getElementById("healthText");
+  const panelGroup = document.getElementById("panelGroup");
+  const pdfPanel = document.getElementById("pdfPanel");
+  const aiPanel = document.getElementById("aiPanel");
+  const resizeHandle = document.getElementById("resizeHandle");
 
-// DOM 元素
-const chatMessages = document.getElementById('chatMessages');
-const messageInput = document.getElementById('messageInput');
-const sendButton = document.getElementById('sendButton');
-const chatInput = document.getElementById('chat-input');
-const welcomeSection = document.getElementById('welcomeSection');
-const loadingOverlay = document.getElementById('loadingOverlay');
-
-// 测试所有功能按钮
-function testAllFunctions() {
-    console.log('开始测试所有功能...');
-    
-    // 测试快速功能按钮
-    const quickButtons = document.querySelectorAll('[onclick^="sendPrompt"]');
-    quickButtons.forEach((button, index) => {
-        console.log(`快速功能按钮 ${index + 1}: ${button.textContent.trim()} - 可点击`);
-    });
-    
-    // 测试侧边栏功能
-    console.log('侧边栏切换功能 - 可用');
-    console.log('新对话按钮 - 可用');
-    console.log('聊天历史 - 可用');
-    console.log('导出对话功能 - 可用');
-    console.log('分享对话功能 - 可用');
-    console.log('设置功能 - 可用');
-    
-    // 测试移动端功能
-    console.log('移动端菜单 - 可用');
-    console.log('移动端遮罩层 - 可用');
-    
-    // 测试输入功能
-    console.log('消息输入 - 可用');
-    console.log('发送按钮 - 可用');
-    console.log('语音输入 - 可用');
-    // 文件上传功能已移除
-    
-    console.log('所有功能测试完成！');
-}
-
-// 测试响应式设计
-function testResponsiveDesign() {
-    console.log('测试响应式设计...');
-    
-    const breakpoints = [
-        { name: '桌面端', width: 1200 },
-        { name: '平板端', width: 768 },
-        { name: '手机端', width: 480 },
-        { name: '小屏手机', width: 320 }
-    ];
-    
-    breakpoints.forEach(bp => {
-        console.log(`${bp.name} (${bp.width}px): 布局适配正常`);
-    });
-    
-    console.log('响应式设计测试完成！');
-}
-
-// 页面加载完成后运行测试
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('app.js - InsurIntellect Agent 界面加载完成');
-    
-    // 立即初始化应用
-    initializeApp();
-    setupEventListeners();
-    loadChatHistory();
-    // 文件拖拽功能已移除
-    
-    // 监听输入变化以启用/禁用发送按钮
-    if (chatInput && sendButton) {
-        chatInput.addEventListener('input', function() {
-            const hasContent = this.value.trim().length > 0;
-            sendButton.disabled = !hasContent;
-        });
-    }
-    
-    // 运行功能测试
-    setTimeout(() => {
-        testAllFunctions();
-        testResponsiveDesign();
-    }, 1000);
-    // 绑定流式开关
-    bindStreamingToggle();
-});
-
-// 初始化应用
-function initializeApp() {
-    console.log('InsurIntellect Agent 初始化中...');
-    
-    // 初始化主题
-    initializeTheme();
-    // 默认启用流式展示（用户可后续通过UI或localStorage控制）
-    if (localStorage.getItem('useStreaming') === null) {
-        localStorage.setItem('useStreaming', 'true');
-    }
-    // 根据状态设置开关初始值
-    const toggle = document.getElementById('enableStreaming');
-    if (toggle) {
-        toggle.checked = isStreamingEnabled();
-    }
-    
-    // 设置默认视图
-    switchView('chat');
-    
-    // 初始化输入框
-    adjustTextareaHeight(chatInput);
-    updateCharCounter();
-    
-    // 检查系统状态
-    checkSystemStatus();
-}
-
-// 设置事件监听器
-function setupEventListeners() {
-    // 输入框事件
-    chatInput.addEventListener('input', function() {
-        adjustTextareaHeight(this);
-        updateCharCounter();
-        updateSendButton();
-    });
-    
-    chatInput.addEventListener('keydown', handleKeyDown);
-    
-    // 发送按钮事件
-    sendButton.addEventListener('click', sendMessage);
-    
-    // 导航项点击事件
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.addEventListener('click', function() {
-            const view = this.getAttribute('onclick').match(/'([^']+)'/)[1];
-            switchView(view);
-        });
-    });
-    
-    // 文件拖拽功能已移除
-
-    // 统一事件绑定：按钮与快捷提示（移除内联事件后）
-    const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
-    if (toggleSidebarBtn) {
-        toggleSidebarBtn.addEventListener('click', () => {
-            const sidebar = document.getElementById('sidebar');
-            if (sidebar) sidebar.classList.toggle('collapsed');
-        });
-    }
-
-    const startNewChatBtn = document.getElementById('startNewChatBtn');
-    if (startNewChatBtn) {
-        startNewChatBtn.addEventListener('click', startNewChat);
-    }
-
-    const clearChatHistoryBtn = document.getElementById('clearChatHistoryBtn');
-    if (clearChatHistoryBtn) {
-        clearChatHistoryBtn.addEventListener('click', clearChatHistory);
-    }
-
-    const exportChatBtn = document.getElementById('exportChatBtn');
-    if (exportChatBtn) {
-        exportChatBtn.addEventListener('click', exportChat);
-    }
-
-    const exportChatTopBtn = document.getElementById('exportChatTopBtn');
-    if (exportChatTopBtn) {
-        exportChatTopBtn.addEventListener('click', exportChat);
-    }
-
-    const shareChatBtn = document.getElementById('shareChatBtn');
-    if (shareChatBtn) {
-        shareChatBtn.addEventListener('click', shareChat);
-    }
-
-    const settingsBtn = document.getElementById('settingsBtn');
-    if (settingsBtn) {
-        settingsBtn.addEventListener('click', openSettings);
-    }
-
-    const themeToggleBtn = document.getElementById('themeToggleBtn');
-    if (themeToggleBtn) {
-        themeToggleBtn.addEventListener('click', toggleTheme);
-    }
-
-    const cancelStreamBtn = document.getElementById('cancelStreamBtn');
-    if (cancelStreamBtn) {
-        cancelStreamBtn.addEventListener('click', cancelStreaming);
-    }
-
-    // 建议提示按钮绑定（使用 data-prompt）
-    document.querySelectorAll('.btn-professional[data-prompt]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const prompt = btn.getAttribute('data-prompt');
-            if (prompt) sendPrompt(prompt);
-        });
-    });
-}
-
-// 处理键盘事件
-function handleKeyDown(event) {
-    if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        sendMessage();
-    }
-}
-
-// 调整文本框高度
-function adjustTextareaHeight(textarea) {
-    textarea.style.height = 'auto';
-    const maxHeight = 120; // 最大高度
-    const newHeight = Math.min(textarea.scrollHeight, maxHeight);
-    textarea.style.height = newHeight + 'px';
-}
-
-// 更新字符计数器
-function updateCharCounter() {
-    const input = messageInput;
-    if (!input) return;
-    
-    const count = input.value.length;
-    // 移除字符计数显示，保持简洁
-}
-
-// 更新发送按钮状态
-function updateSendButton() {
-    const hasText = chatInput.value.trim().length > 0;
-    sendButton.disabled = !hasText || isLoading;
-    
-    if (hasText && !isLoading) {
-        sendButton.classList.add('active');
-    } else {
-        sendButton.classList.remove('active');
-    }
-}
-
-// 切换视图
-function switchView(viewName) {
-    // 更新导航状态
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    
-    document.querySelectorAll('.nav-item').forEach(item => {
-        const onclick = item.getAttribute('onclick');
-        if (onclick && onclick.includes(viewName)) {
-            item.classList.add('active');
-        }
-    });
-    
-    // 切换视图内容
-    document.querySelectorAll('.view').forEach(view => {
-        view.classList.remove('active');
-    });
-    
-    const targetView = document.getElementById(viewName + 'View');
-    if (targetView) {
-        targetView.classList.add('active');
-        currentView = viewName;
-    }
-}
-
-// 开始新对话
-function startNewChat() {
-    currentChatId = generateChatId();
-    clearChatMessages();
-    showWelcomeSection();
-    chatInput.focus();
-}
-
-// 生成聊天ID
-function generateChatId() {
-    return 'chat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-}
-
-// 清空聊天消息
-function clearChatMessages() {
-    const messages = chatMessages.querySelectorAll('.message');
-    messages.forEach(message => message.remove());
-}
-
-// 显示欢迎区域
-function showWelcomeSection() {
-    if (welcomeSection) {
-        welcomeSection.style.display = 'block';
-    }
-}
-
-// 隐藏欢迎区域
-function hideWelcomeSection() {
-    if (welcomeSection) {
-        welcomeSection.style.display = 'none';
-    }
-}
-
-// 发送消息（支持流式/非流式）
-async function sendMessage() {
-    const message = chatInput.value.trim();
-    if (!message || isLoading) return;
-
-    // 隐藏欢迎区域
-    hideWelcomeSection();
-
-    // 添加用户消息
-    addMessage(message, 'user');
-
-    // 清空输入框
-    chatInput.value = '';
-    updateCharCounter();
-    updateSendButton();
-    adjustTextareaHeight(chatInput);
-
-    // 根据开关选择流式或非流式
-    if (isStreamingEnabled()) {
-        startStreamingWithFetch(message);
-    } else {
-        sendMessageFetch(message);
-    }
-}
-
-// 判断是否启用流式展示
-function isStreamingEnabled() {
-    const checkbox = document.getElementById('enableStreaming');
-    if (checkbox) return !!checkbox.checked;
-    const url = new URL(window.location.href);
-    if (url.searchParams.get('stream') === '1' || url.searchParams.get('streaming') === 'true') return true;
-    const persisted = localStorage.getItem('useStreaming');
-    return persisted === 'true';
-}
-
-// 绑定开关并联动状态
-function bindStreamingToggle() {
-    const toggle = document.getElementById('enableStreaming');
-    const status = document.getElementById('streamStatus');
-    const cancelBtn = document.getElementById('cancelStreamBtn');
-    if (toggle) {
-        toggle.addEventListener('change', () => {
-            const enabled = !!toggle.checked;
-            localStorage.setItem('useStreaming', enabled ? 'true' : 'false');
-        });
-    }
-    if (cancelBtn) {
-        cancelBtn.addEventListener('click', () => cancelStreaming());
-    }
-    if (status) {
-        status.style.display = 'none';
-    }
-}
-
-// 非流式请求（原有 POST 逻辑）
-async function sendMessageFetch(message) {
-    setLoading(true);
+  let pdfs = [];
+  let activeSources = [];
+  let lastStickyView = null;
+  const sessionId = (function () {
     try {
-        const response = await fetch('/api/v1/queries/ask', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                question: message,
-                query_type: 'general',
-                show_analysis: document.getElementById('enableAnalysis')?.checked || false,
-                show_sources: document.getElementById('enableSources')?.checked || false
-            })
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        addMessage(data.answer, 'assistant', data.sources);
-        saveChatToHistory(message, data.answer);
-    } catch (error) {
-        console.error('发送消息失败:', error);
-        addMessage('抱歉，发生了错误。请稍后重试。', 'assistant', null, true);
-    } finally {
-        setLoading(false);
-    }
-}
-
-// 流式请求：使用原生 EventSource 连接 GET /queries/ask/stream
-function startStreamingWithEventSource(message) {
-    setLoading(true);
-    streamingInProgress = true;
-    streamRetryCount = 0;
-    const status = document.getElementById('streamStatus');
-    if (status) status.style.display = 'inline';
-
-    // 创建一个占位的助手消息，后续逐字填充
-    const streamMsg = document.createElement('div');
-    streamMsg.className = 'message assistant';
-    const content = document.createElement('div');
-    content.className = 'message-content';
-    content.innerHTML = `
-        <div class="message-avatar"><i class="fas fa-robot"></i></div>
-        <div class="message-text" id="streamingText"></div>
-        <div class="streaming-meta" id="streamingMeta">
-            <div class="streaming-status"><i class="fas fa-spinner fa-spin"></i> 正在生成...</div>
-        </div>
-    `;
-    streamMsg.appendChild(content);
-    chatMessages.appendChild(streamMsg);
-    scrollToBottom();
-
-    const textEl = content.querySelector('#streamingText');
-    const metaEl = content.querySelector('#streamingMeta');
-    let bufferText = '';
-    let aborted = false;
-    let sseUrl;
-
-    // 组装 SSE URL
-    const params = new URLSearchParams({
-        question: message,
-        query_type: 'general'
-    });
-    sseUrl = `/api/v1/queries/ask/stream?${params.toString()}`;
-
-    let es;
-    const attachHandlers = (source) => {
-        source.onopen = () => {
-            // 连接成功
-        };
-        source.onmessage = (ev) => {
-            // 未指定事件类型的消息
-            try {
-                const payload = JSON.parse(ev.data);
-                if (payload && payload.text) {
-                    bufferText += payload.text;
-                    textEl.textContent = bufferText;
-                    scrollToBottom();
-                }
-            } catch (_) {}
-        };
-
-        source.addEventListener('start', (ev) => {
-            // 可在此设置初始占位或清空状态
-        });
-        source.addEventListener('context', (ev) => {
-            try {
-                const payload = JSON.parse(ev.data);
-                const chunks = Array.isArray(payload.retrieved_chunks) ? payload.retrieved_chunks : [];
-                if (chunks.length > 0) {
-                    const sources = chunks.slice(0, 5).map((c, idx) => {
-                        const name = c.document_name || `文档#${c.document_id}`;
-                        const page = (c.page_number !== null && c.page_number !== undefined) ? `第${c.page_number}页` : '';
-                        const score = (typeof c.similarity_score === 'number') ? `（相似度 ${c.similarity_score.toFixed(2)}）` : '';
-                        return `${name}${page ? ' ' + page : ''} ${score}`.trim();
-                    });
-                    const ctxHtml = createSourcesSection(sources);
-                    const box = document.createElement('div');
-                    box.innerHTML = ctxHtml;
-                    metaEl.appendChild(box);
-                }
-            } catch (err) {
-                console.error('解析 context 事件失败:', err);
-            }
-        });
-        source.addEventListener('token', (ev) => {
-            try {
-                const payload = JSON.parse(ev.data);
-                const token = payload.text || payload.token || payload.content || '';
-                if (token) {
-                    bufferText += token;
-                    textEl.textContent = bufferText;
-                    scrollToBottom();
-                }
-            } catch (err) {
-                console.error('解析 token 事件失败:', err);
-            }
-        });
-        source.addEventListener('end', (ev) => {
-            try {
-                const payload = JSON.parse(ev.data);
-                const finalHtml = formatAssistantMessage(bufferText);
-                textEl.innerHTML = finalHtml;
-                saveChatToHistory(message, bufferText);
-            } catch (err) {
-                console.error('解析 end 事件失败:', err);
-            } finally {
-                cleanupStream(source);
-                streamingInProgress = false;
-                const status = document.getElementById('streamStatus');
-                if (status) status.style.display = 'none';
-                setLoading(false);
-            }
-        });
-        source.addEventListener('error', (ev) => {
-            let msg = '抱歉，流式响应发生错误。';
-            try {
-                const payload = JSON.parse(ev.data);
-                if (payload && (payload.message || payload.error)) msg = `抱歉，发生错误：${payload.message || payload.error}`;
-            } catch (_) {}
-            textEl.textContent = msg;
-            cleanupStream(source);
-            streamingInProgress = false;
-            const status = document.getElementById('streamStatus');
-            if (status) status.style.display = 'none';
-            setLoading(false);
-        });
-
-        source.onerror = (e) => {
-            console.error('EventSource 连接错误:', e);
-            if (aborted) {
-                cleanupStream(source);
-                streamingInProgress = false;
-                const status = document.getElementById('streamStatus');
-                if (status) status.style.display = 'none';
-                setLoading(false);
-                return;
-            }
-            if (!bufferText && streamRetryCount < MAX_STREAM_RETRIES) {
-                streamRetryCount += 1;
-                console.warn('尝试断线重连...');
-                cleanupStream(source);
-                try {
-                    const newEs = new EventSource(sseUrl);
-                    activeEventSource = newEs;
-                    attachHandlers(newEs);
-                } catch (err) {
-                    console.error('重连失败，回退到非流式:', err);
-                    sendMessageFetch(message);
-                    streamingInProgress = false;
-                    const status = document.getElementById('streamStatus');
-                    if (status) status.style.display = 'none';
-                    setLoading(false);
-                }
-                return;
-            }
-            cleanupStream(source);
-            streamingInProgress = false;
-            const status = document.getElementById('streamStatus');
-            if (status) status.style.display = 'none';
-            setLoading(false);
-        };
-    };
-
-    try {
-        es = new EventSource(sseUrl);
-        activeEventSource = es;
-        attachHandlers(es);
+      const k = "insur_session_id";
+      let v = localStorage.getItem(k);
+      if (!v) {
+        v = "s_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        localStorage.setItem(k, v);
+      }
+      return v;
     } catch (e) {
-        console.error('创建 EventSource 失败，回退到非流式:', e);
-        sendMessageFetch(message);
-        streamingInProgress = false;
-        if (status) status.style.display = 'none';
-        return;
+      return "s_" + String(Date.now());
     }
+  })();
+ // P3: keep last citation across follow-ups
+  let currentView = { name: null, url: null, page: null, index: null, excerpt: "" };
+  let isLoading = false;
+  let abortController = null;
+  let citeSeq = 0;
+  let debugMode = false;
+  let lastEmbeddingProvider = null;
+  let pdfDocCache = { url: null, doc: null, renderToken: 0 };
 
-    // 连接打开
-    es.onopen = () => {
-        // 已连接，等待事件
-    };
+  const DISPLAY_FALLBACK = {
+    "sample_term_life.pdf": "示例终身寿险条款",
+    "sample_critical_illness.pdf": "示例重大疾病保险条款",
+  };
 
-    // 未命名事件（如果服务端发送了默认message）
-    es.onmessage = (ev) => {
-        // 兼容处理，但我们的服务端使用命名事件
-        try {
-            const payload = JSON.parse(ev.data);
-            const token = payload.content || payload.token || payload.text;
-            if (token) {
-                bufferText += token;
-                textEl.textContent = bufferText;
-                scrollToBottom();
-            }
-        } catch (_) {}
-    };
+  // Configure PDF.js worker if available
+  try {
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "/static/vendor/pdfjs/pdf.worker.min.js";
+    }
+  } catch (_e) {}
 
-    // 命名事件：start
-    es.addEventListener('start', (ev) => {
-        try {
-            const payload = JSON.parse(ev.data);
-            // 可根据 payload 初始化显示
-        } catch (_) {}
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function basename(name) {
+    const s = String(name || "");
+    const parts = s.replace(/\\/g, "/").split("/");
+    return parts[parts.length - 1] || s;
+  }
+
+  function displayNameFor(docName, extra) {
+    extra = extra || {};
+    if (extra.display_name) return extra.display_name;
+    if (extra.metadata && extra.metadata.display_name) {
+      return extra.metadata.display_name;
+    }
+    const bare = basename(docName);
+    if (DISPLAY_FALLBACK[bare]) return DISPLAY_FALLBACK[bare];
+    const hit = resolvePdfByName(docName);
+    if (hit && hit.display_name) return hit.display_name;
+    return bare || "未知文档";
+  }
+
+  function cleanExcerpt(text) {
+    let t = String(text || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    t = t
+      .replace(
+        /^(文档名称|产品名称|文档类型|生效日期|状态)[：:][^。；;\n]{0,40}[。；;\s]*/g,
+        ""
+      )
+      .trim();
+    if (t.length > 180) t = t.slice(0, 180) + "…";
+    return t;
+  }
+
+  function resolvePdfByName(docName) {
+    if (!docName) return null;
+    const bare = basename(docName).toLowerCase();
+    return (
+      pdfs.find(function (p) {
+        return basename(p.name).toLowerCase() === bare;
+      }) ||
+      pdfs.find(function (p) {
+        return (
+          basename(p.name).toLowerCase().includes(bare) ||
+          bare.includes(basename(p.name).toLowerCase())
+        );
+      }) ||
+      null
+    );
+  }
+
+  function setEvidence(source, index) {
+    if (!evidenceStrip) return;
+    if (!source) {
+      evidenceStrip.hidden = true;
+      if (evidenceCite) evidenceCite.textContent = "";
+      if (evidenceExcerpt) evidenceExcerpt.textContent = "";
+      return;
+    }
+    const name = displayNameFor(
+      source.document_name || source.source || source.filename,
+      source
+    );
+    const page = source.page_number ?? source.page;
+    const excerpt = cleanExcerpt(
+      source.content || source.excerpt || source.text || ""
+    );
+    evidenceStrip.hidden = false;
+    evidenceCite.textContent =
+      "[" +
+      (index || "?") +
+      "] " +
+      name +
+      (page != null && page !== "" ? " · p." + page : "");
+    evidenceExcerpt.textContent = excerpt || "（无摘录）";
+  }
+
+  function hidePdfViews() {
+    if (pdfFrame) {
+      pdfFrame.hidden = true;
+      pdfFrame.removeAttribute("src");
+    }
+    if (pdfJsView) pdfJsView.hidden = true;
+    if (pdfEmpty) pdfEmpty.hidden = false;
+  }
+
+  function pickHighlightNeedle(excerpt) {
+    const t = String(excerpt || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!t) return "";
+    // Prefer a mid-length continuous clause fragment
+    const parts = t.split(/[。；;！!？?\n]/).map(function (s) {
+      return s.trim();
     });
-
-    // 命名事件：context（可选显示检索信息）
-    // 事件绑定由 attachHandlers 完成
-
-    // 命名事件：token（逐字追加）
-    es.addEventListener('token', (ev) => {
-        try {
-            const payload = JSON.parse(ev.data);
-            const token = (typeof payload.content === 'string') ? payload.content : payload.token || payload.text;
-            if (token) {
-                bufferText += token;
-                textEl.textContent = bufferText;
-                scrollToBottom();
-            }
-        } catch (err) {
-            console.error('解析 token 事件失败:', err);
-        }
+    let best = "";
+    parts.forEach(function (p) {
+      if (p.length >= 8 && p.length <= 48 && p.length > best.length) best = p;
     });
+    if (best) return best;
+    return t.slice(0, Math.min(36, t.length));
+  }
 
-    // 命名事件：end（完成）
-    // 事件绑定由 attachHandlers 完成
-
-    // 命名事件：error（服务端错误）
-    // 事件绑定由 attachHandlers 完成
-
-    // 客户端错误（网络/连接）
-    // 事件绑定由 attachHandlers 完成
-}
-
-// 流式请求（统一到 POST /queries/ask?stream=1）：使用 fetch 读取 SSE
-async function startStreamingWithFetch(message) {
-    setLoading(true);
-    streamingInProgress = true;
-    const status = document.getElementById('streamStatus');
-    if (status) status.style.display = 'inline';
-
-    // 创建一个占位的助手消息，后续逐字填充
-    const streamMsg = document.createElement('div');
-    streamMsg.className = 'message assistant';
-    const content = document.createElement('div');
-    content.className = 'message-content';
-    content.innerHTML = `
-        <div class="message-avatar"><i class="fas fa-robot"></i></div>
-        <div class="message-text" id="streamingText"></div>
-        <div class="streaming-meta" id="streamingMeta">
-            <div class="streaming-status"><i class="fas fa-spinner fa-spin"></i> 正在生成...</div>
-        </div>
-    `;
-    streamMsg.appendChild(content);
-    chatMessages.appendChild(streamMsg);
-    scrollToBottom();
-
-    const textEl = content.querySelector('#streamingText');
-    const metaEl = content.querySelector('#streamingMeta');
-    let bufferText = '';
-
-    const controller = new AbortController();
-    activeStreamAbortController = controller;
-
+  async function renderPdfJs(url, pageNumber, excerpt) {
+    if (!window.pdfjsLib || !pdfCanvas || !pdfJsView) {
+      return false;
+    }
+    const page =
+      pageNumber != null && pageNumber !== "" && !Number.isNaN(Number(pageNumber))
+        ? Math.max(1, Number(pageNumber))
+        : 1;
+    const token = ++pdfDocCache.renderToken;
     try {
-        const response = await fetch('/api/v1/queries/ask?stream=1', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                question: message,
-                query_type: 'general',
-                stream: true
-            }),
-            signal: controller.signal
+      if (pdfDocCache.url !== url || !pdfDocCache.doc) {
+        const loadingTask = window.pdfjsLib.getDocument({ url: url });
+        const doc = await loadingTask.promise;
+        if (token !== pdfDocCache.renderToken) return false;
+        pdfDocCache = { url: url, doc: doc, renderToken: token };
+      }
+      const doc = pdfDocCache.doc;
+      const pdfPage = await doc.getPage(Math.min(page, doc.numPages || page));
+      if (token !== pdfDocCache.renderToken) return false;
+
+      const wrap = document.getElementById("pdfViewerWrap");
+      const wrapW = (wrap && wrap.clientWidth) || 640;
+      const unscaled = pdfPage.getViewport({ scale: 1 });
+      const scale = Math.min(2.2, Math.max(1.0, (wrapW - 8) / unscaled.width));
+      const viewport = pdfPage.getViewport({ scale: scale });
+
+      const canvas = pdfCanvas;
+      const ctx = canvas.getContext("2d");
+      const outputScale = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(viewport.width * outputScale);
+      canvas.height = Math.floor(viewport.height * outputScale);
+      canvas.style.width = Math.floor(viewport.width) + "px";
+      canvas.style.height = Math.floor(viewport.height) + "px";
+      const transform =
+        outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+
+      if (pdfTextLayer) {
+        pdfTextLayer.innerHTML = "";
+        pdfTextLayer.style.width = canvas.style.width;
+        pdfTextLayer.style.height = canvas.style.height;
+      }
+      if (pdfHighlightLayer) {
+        pdfHighlightLayer.innerHTML = "";
+        pdfHighlightLayer.style.width = canvas.style.width;
+        pdfHighlightLayer.style.height = canvas.style.height;
+      }
+
+      await pdfPage.render({
+        canvasContext: ctx,
+        viewport: viewport,
+        transform: transform,
+      }).promise;
+      if (token !== pdfDocCache.renderToken) return false;
+
+      // Text layer for selection + highlight targeting
+      const textContent = await pdfPage.getTextContent();
+      if (token !== pdfDocCache.renderToken) return false;
+      if (pdfTextLayer && window.pdfjsLib.TextLayer) {
+        // Prefer modern TextLayer API if present
+        try {
+          const textLayer = new window.pdfjsLib.TextLayer({
+            textContentSource: textContent,
+            container: pdfTextLayer,
+            viewport: viewport,
+          });
+          await textLayer.render();
+        } catch (_tl) {
+          // Fallback: manual span placement
+          textContent.items.forEach(function (item) {
+            if (!item.str) return;
+            const tx = window.pdfjsLib.Util.transform(
+              viewport.transform,
+              item.transform
+            );
+            const span = document.createElement("span");
+            span.textContent = item.str;
+            span.style.left = tx[4] + "px";
+            span.style.top = tx[5] - item.height * scale + "px";
+            span.style.fontSize = Math.max(6, item.height * scale) + "px";
+            span.style.position = "absolute";
+            span.style.whiteSpace = "pre";
+            span.style.color = "transparent";
+            span.style.transformOrigin = "0% 0%";
+            pdfTextLayer.appendChild(span);
+          });
+        }
+      } else if (pdfTextLayer) {
+        textContent.items.forEach(function (item) {
+          if (!item.str) return;
+          const tx = window.pdfjsLib.Util.transform(
+            viewport.transform,
+            item.transform
+          );
+          const span = document.createElement("span");
+          span.textContent = item.str;
+          span.style.left = tx[4] + "px";
+          span.style.top = tx[5] - (item.height || 10) * scale + "px";
+          span.style.fontSize =
+            Math.max(6, (item.height || 10) * scale) + "px";
+          span.style.position = "absolute";
+          span.style.whiteSpace = "pre";
+          span.style.color = "transparent";
+          pdfTextLayer.appendChild(span);
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      }
 
-        // 读取 SSE 数据帧
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder('utf-8');
-        let buf = '';
-        let eventType = 'message';
-        let eventDataLines = [];
-
-        const dispatchEvent = (type, dataStr) => {
-            try {
-                const payload = JSON.parse(dataStr);
-                if (type === 'start') {
-                    // 可根据 payload 初始化显示
-                } else if (type === 'context') {
-                    const chunks = Array.isArray(payload.retrieved_chunks) ? payload.retrieved_chunks : [];
-                    if (chunks.length > 0) {
-                        const sources = chunks.slice(0, 5).map((c, idx) => {
-                            const name = c.document_name || `文档#${c.document_id}`;
-                            const page = (c.page_number !== null && c.page_number !== undefined) ? `第${c.page_number}页` : '';
-                            const score = (typeof c.similarity_score === 'number') ? `（相似度 ${c.similarity_score.toFixed(2)}）` : '';
-                            return `${name}${page ? ' ' + page : ''} ${score}`.trim();
-                        });
-                        const ctxHtml = createSourcesSection(sources);
-                        const box = document.createElement('div');
-                        box.innerHTML = ctxHtml;
-                        metaEl.appendChild(box);
-                    }
-                } else if (type === 'token') {
-                    const token = payload.text || payload.token || payload.content || '';
-                    if (token) {
-                        bufferText += token;
-                        textEl.textContent = bufferText;
-                        scrollToBottom();
-                    }
-                } else if (type === 'end') {
-                    const finalHtml = formatAssistantMessage(bufferText);
-                    textEl.innerHTML = finalHtml;
-                    saveChatToHistory(message, bufferText);
-                    cleanupStream();
-                    streamingInProgress = false;
-                    if (status) status.style.display = 'none';
-                    setLoading(false);
-                } else if (type === 'error') {
-                    let msg = '抱歉，流式响应发生错误。';
-                    if (payload && (payload.message || payload.error)) msg = `抱歉，发生错误：${payload.message || payload.error}`;
-                    textEl.textContent = msg;
-                    cleanupStream();
-                    streamingInProgress = false;
-                    if (status) status.style.display = 'none';
-                    setLoading(false);
-                } else {
-                    // 默认消息：忽略或追加 text 字段
-                    if (payload && payload.text) {
-                        bufferText += payload.text;
-                        textEl.textContent = bufferText;
-                        scrollToBottom();
-                    }
-                }
-            } catch (err) {
-                // 忽略单帧解析错误
-            }
-        };
-
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-
-            // 逐行解析，依据空行分隔事件
-            const lines = buf.split(/\r?\n/);
-            // 保留最后一行（可能是不完整行）
-            buf = lines.pop();
-
-            for (const line of lines) {
-                if (line.startsWith('event:')) {
-                    eventType = line.slice(6).trim();
-                } else if (line.startsWith('data:')) {
-                    eventDataLines.push(line.slice(5).trim());
-                } else if (line === '') {
-                    // 空行：触发事件
-                    const dataStr = eventDataLines.join('\n');
-                    if (eventType && dataStr) {
-                        dispatchEvent(eventType, dataStr);
-                    }
-                    // 重置
-                    eventType = 'message';
-                    eventDataLines = [];
-                }
-            }
+      // Highlight excerpt spans if found
+      const needle = pickHighlightNeedle(excerpt);
+      if (needle && pdfTextLayer && pdfHighlightLayer) {
+        const spans = Array.from(pdfTextLayer.querySelectorAll("span"));
+        const joined = spans
+          .map(function (s) {
+            return s.textContent || "";
+          })
+          .join("");
+        const idx = joined.indexOf(needle);
+        // Also try shorter needle
+        let useNeedle = needle;
+        let useIdx = idx;
+        if (useIdx < 0 && needle.length > 12) {
+          useNeedle = needle.slice(0, 12);
+          useIdx = joined.indexOf(useNeedle);
         }
-
-        // 处理缓冲尾巴：若有未触发的事件
-        if (eventDataLines.length > 0) {
-            const dataStr = eventDataLines.join('\n');
-            dispatchEvent(eventType, dataStr);
-        }
-
-    } catch (error) {
-        console.error('流式发送失败:', error);
-        addMessage('抱歉，发生了错误。请稍后重试。', 'assistant', null, true);
-    } finally {
-        streamingInProgress = false;
-        if (status) status.style.display = 'none';
-        setLoading(false);
-    }
-}
-
-function cleanupStream(es) {
-    try { es && es.close && es.close(); } catch (_) {}
-    activeEventSource = null;
-    if (activeStreamAbortController) {
-        try { activeStreamAbortController.abort(); } catch (_) {}
-        activeStreamAbortController = null;
-    }
-}
-
-// 取消流式生成
-function cancelStreaming() {
-    if (activeEventSource) {
-        try { activeEventSource.close(); } catch (_) {}
-    }
-    if (activeStreamAbortController) {
-        try { activeStreamAbortController.abort(); } catch (_) {}
-        activeStreamAbortController = null;
-    }
-    streamingInProgress = false;
-    const status = document.getElementById('streamStatus');
-    if (status) status.style.display = 'none';
-    setLoading(false);
-}
-
-// 发送预设提示
-function sendPrompt(prompt) {
-    chatInput.value = prompt;
-    updateCharCounter();
-    updateSendButton();
-    sendMessage();
-}
-
-// 添加消息到聊天区域
-function addMessage(content, role, sources = null, isError = false) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${role}${isError ? ' error' : ''}`;
-    
-    const messageContent = document.createElement('div');
-    messageContent.className = 'message-content';
-    
-    if (role === 'user') {
-        messageContent.innerHTML = `
-            <div class="message-avatar">
-                <i class="fas fa-user"></i>
-            </div>
-            <div class="message-text">${escapeHtml(content)}</div>
-        `;
-    } else {
-        messageContent.innerHTML = `
-            <div class="message-avatar">
-                <i class="fas fa-robot"></i>
-            </div>
-            <div class="message-text">${formatAssistantMessage(content)}</div>
-            ${sources ? createSourcesSection(sources) : ''}
-        `;
-    }
-    
-    messageDiv.appendChild(messageContent);
-    
-    // 添加消息操作按钮
-    if (role === 'assistant' && !isError) {
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'message-actions';
-        actionsDiv.innerHTML = `
-            <button class="action-btn" onclick="copyMessage(this)" title="复制">
-                <i class="fas fa-copy"></i>
-            </button>
-            <button class="action-btn" onclick="regenerateMessage(this)" title="重新生成">
-                <i class="fas fa-redo"></i>
-            </button>
-            <button class="action-btn" onclick="likeMessage(this)" title="点赞">
-                <i class="fas fa-thumbs-up"></i>
-            </button>
-        `;
-        messageDiv.appendChild(actionsDiv);
-    }
-    
-    chatMessages.appendChild(messageDiv);
-    scrollToBottom();
-}
-
-// 格式化助手消息
-function formatAssistantMessage(content) {
-    // 简单的 Markdown 支持
-    return content
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-        .replace(/`(.*?)`/g, '<code>$1</code>')
-        .replace(/\n/g, '<br>');
-}
-
-// 创建来源区域
-function createSourcesSection(sources) {
-    if (!sources || sources.length === 0) return '';
-    
-    const sourcesHtml = sources.map((source, index) => `
-        <div class="source-item">
-            <span class="source-number">${index + 1}</span>
-            <span class="source-text">${escapeHtml(source)}</span>
-        </div>
-    `).join('');
-    
-    return `
-        <div class="message-sources">
-            <div class="sources-header">
-                <i class="fas fa-link"></i>
-                <span>参考来源</span>
-            </div>
-            <div class="sources-list">
-                ${sourcesHtml}
-            </div>
-        </div>
-    `;
-}
-
-// HTML 转义
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// 滚动到底部
-function scrollToBottom() {
-    setTimeout(() => {
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }, 100);
-}
-
-// 设置加载状态
-function setLoading(loading) {
-    isLoading = loading;
-    
-    if (loading) {
-        loadingOverlay.style.display = 'flex';
-        sendButton.disabled = true;
-        sendButton.classList.remove('active');
-    } else {
-        loadingOverlay.style.display = 'none';
-        updateSendButton();
-    }
-}
-
-// 复制消息
-function copyMessage(button) {
-    const messageText = button.closest('.message').querySelector('.message-text').textContent;
-    navigator.clipboard.writeText(messageText).then(() => {
-        showToast('消息已复制到剪贴板');
-    });
-}
-
-// 重新生成消息
-function regenerateMessage(button) {
-    // 找到上一条用户消息
-    const currentMessage = button.closest('.message');
-    let userMessage = currentMessage.previousElementSibling;
-    
-    while (userMessage && !userMessage.classList.contains('user')) {
-        userMessage = userMessage.previousElementSibling;
-    }
-    
-    if (userMessage) {
-        const messageText = userMessage.querySelector('.message-text').textContent;
-        // 移除当前AI回复
-        currentMessage.remove();
-        // 重新发送消息
-        sendMessage();
-    }
-}
-
-// 点赞消息
-function likeMessage(button) {
-    button.classList.toggle('liked');
-    const icon = button.querySelector('i');
-    if (button.classList.contains('liked')) {
-        icon.className = 'fas fa-thumbs-up';
-        button.style.color = 'var(--primary-color)';
-    } else {
-        icon.className = 'fas fa-thumbs-up';
-        button.style.color = '';
-    }
-}
-
-// 显示提示消息
-function showToast(message, type = 'info') {
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    
-    document.body.appendChild(toast);
-    
-    // 显示动画
-    setTimeout(() => toast.classList.add('show'), 100);
-    
-    // 自动隐藏
-    setTimeout(() => {
-        toast.classList.remove('show');
-        setTimeout(() => document.body.removeChild(toast), 300);
-    }, 3000);
-}
-
-// 文件上传相关
-// 文件上传相关功能已移除
-// function toggleFileUpload() - 已删除
-// function setupFileDragAndDrop() - 已删除  
-// function handleFiles(files) - 已删除
-// function uploadFile(file) - 已删除
-
-// 语音输入
-function toggleVoiceInput() {
-    showToast('语音输入功能开发中...');
-}
-
-// 聊天历史相关
-function loadChatHistory() {
-    // 从本地存储加载聊天历史
-    const saved = localStorage.getItem('chatHistory');
-    if (saved) {
-        chatHistory = JSON.parse(saved);
-        updateChatHistoryUI();
-    }
-}
-
-function saveChatToHistory(userMessage, assistantMessage) {
-    const chatItem = {
-        id: currentChatId,
-        timestamp: new Date().toISOString(),
-        title: userMessage.substring(0, 50) + (userMessage.length > 50 ? '...' : ''),
-        userMessage,
-        assistantMessage
-    };
-    
-    // 添加到历史记录
-    chatHistory.unshift(chatItem);
-    
-    // 限制历史记录数量
-    if (chatHistory.length > 50) {
-        chatHistory = chatHistory.slice(0, 50);
-    }
-    
-    // 保存到本地存储
-    localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
-    
-    // 更新UI
-    updateChatHistoryUI();
-}
-
-function updateChatHistoryUI() {
-    const historyList = document.getElementById('chatHistoryList');
-    if (!historyList) return;
-    
-    historyList.innerHTML = '';
-    
-    chatHistory.forEach(item => {
-        const historyItem = document.createElement('div');
-        historyItem.className = 'chat-history-item';
-        historyItem.innerHTML = `
-            <div class="history-title">${escapeHtml(item.title)}</div>
-            <div class="history-time">${formatTime(item.timestamp)}</div>
-        `;
-        
-        historyItem.addEventListener('click', () => loadChatFromHistory(item));
-        historyList.appendChild(historyItem);
-    });
-}
-
-function loadChatFromHistory(chatItem) {
-    currentChatId = chatItem.id;
-    clearChatMessages();
-    hideWelcomeSection();
-    
-    addMessage(chatItem.userMessage, 'user');
-    addMessage(chatItem.assistantMessage, 'assistant');
-}
-
-function clearChatHistory() {
-    if (confirm('确定要清空所有聊天历史吗？')) {
-        chatHistory = [];
-        localStorage.removeItem('chatHistory');
-        updateChatHistoryUI();
-        showToast('聊天历史已清空');
-    }
-}
-
-// 格式化时间
-function formatTime(timestamp) {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now - date;
-    
-    if (diff < 60000) { // 1分钟内
-        return '刚刚';
-    } else if (diff < 3600000) { // 1小时内
-        return Math.floor(diff / 60000) + '分钟前';
-    } else if (diff < 86400000) { // 1天内
-        return Math.floor(diff / 3600000) + '小时前';
-    } else {
-        return date.toLocaleDateString();
-    }
-}
-
-// 获取模型信息并更新显示
-async function updateModelInfo() {
-    try {
-        console.log('开始获取模型信息...');
-        const response = await fetch('/api/v1/health/model');
-        const data = await response.json();
-        console.log('模型信息响应:', data);
-        
-        const modelStatus = document.getElementById('model-status');
-        console.log('找到model-status元素:', modelStatus);
-        
-        if (modelStatus) {
-            // 支持 core/light 字段，兼容旧字段 model
-            const coreRaw = data.core_model || data.model || '';
-            const lightRaw = data.light_model || data.model || '';
-            const coreName = (coreRaw && typeof coreRaw === 'string') ? (coreRaw.split('/').pop() || coreRaw) : '';
-            const lightName = (lightRaw && typeof lightRaw === 'string') ? (lightRaw.split('/').pop() || lightRaw) : '';
-            const statusText = (coreName && lightName)
-                ? `核心: ${coreName} / 轻量: ${lightName} 已连接`
-                : `${(data.model || '未知模型')} 已连接`;
-            console.log('设置状态文本:', statusText);
-            modelStatus.textContent = statusText;
-        }
-    } catch (error) {
-        console.error('获取模型信息失败:', error);
-        const modelStatus = document.getElementById('model-status');
-        if (modelStatus) {
-            modelStatus.textContent = '模型连接失败';
-        }
-    }
-}
-
-// 系统状态检查
-async function checkSystemStatus() {
-    console.log('开始系统状态检查...');
-    
-    const statusIndicator = document.querySelector('.status-indicator');
-    const statusText = document.querySelector('.status-text');
-    const modelStatus = document.getElementById('model-status');
-    
-    console.log('找到的元素:', { statusIndicator, statusText, modelStatus });
-    
-    if (!statusIndicator || !statusText || !modelStatus) {
-        console.error('未找到必要的状态显示元素');
-        // 延迟重试
-        setTimeout(() => checkSystemStatus(), 1000);
-        return;
-    }
-
-    try {
-        // 先设置系统在线状态
-        statusIndicator.className = 'w-2 h-2 bg-green-500 rounded-full status-indicator online';
-        statusText.textContent = '系统在线';
-        modelStatus.textContent = '正在连接...';
-        
-        console.log('开始获取模型信息...');
-        
-        // 获取模型信息
-        const modelResponse = await fetch('/api/v1/health/model');
-        if (!modelResponse.ok) {
-            throw new Error(`HTTP ${modelResponse.status}: ${modelResponse.statusText}`);
-        }
-        
-        const modelData = await modelResponse.json();
-        console.log('模型信息响应:', modelData);
-        
-        if (modelData.model || modelData.core_model || modelData.light_model) {
-            const coreRaw = modelData.core_model || modelData.model || '';
-            const lightRaw = modelData.light_model || modelData.model || '';
-            const coreName = (coreRaw && typeof coreRaw === 'string') ? (coreRaw.split('/').pop() || coreRaw) : '';
-            const lightName = (lightRaw && typeof lightRaw === 'string') ? (lightRaw.split('/').pop() || lightRaw) : '';
-            const statusText = (coreName && lightName)
-                ? `核心: ${coreName} / 轻量: ${lightName} 已连接`
-                : `${(modelData.model || '未知模型')} 已连接`;
-            console.log('设置模型状态:', statusText);
-            modelStatus.textContent = statusText;
-            modelStatus.className = 'text-xs text-green-600 dark:text-green-400';
+        if (useIdx >= 0) {
+          let cursor = 0;
+          spans.forEach(function (span) {
+            const t = span.textContent || "";
+            const start = cursor;
+            const end = cursor + t.length;
+            cursor = end;
+            if (end <= useIdx || start >= useIdx + useNeedle.length) return;
+            const rect = span.getBoundingClientRect();
+            const parent = pdfJsView.getBoundingClientRect();
+            const mark = document.createElement("div");
+            mark.className = "pdf-highlight-mark";
+            mark.style.left = rect.left - parent.left + pdfJsView.scrollLeft + "px";
+            mark.style.top = rect.top - parent.top + pdfJsView.scrollTop + "px";
+            mark.style.width = Math.max(4, rect.width) + "px";
+            mark.style.height = Math.max(10, rect.height) + "px";
+            pdfHighlightLayer.appendChild(mark);
+            span.classList.add("is-hit");
+          });
         } else {
-            modelStatus.textContent = '模型信息获取失败';
-            modelStatus.className = 'text-xs text-red-600 dark:text-red-400';
+          // Portfolio-honest fallback: soft page banner when text not located
+          const banner = document.createElement("div");
+          banner.className = "pdf-highlight-fallback";
+          banner.textContent = "摘录定位：本页 · 未精确匹配文本层（仍显示页码证据）";
+          pdfHighlightLayer.appendChild(banner);
+          if (typeof showToast === "function") {
+            showToast("无法高亮摘录，已打开原页");
+          }
         }
-        
-    } catch (error) {
-        console.error('系统状态检查失败:', error);
-        statusIndicator.className = 'w-2 h-2 bg-red-500 rounded-full status-indicator offline';
-        statusText.textContent = '系统离线';
-        modelStatus.textContent = '连接失败';
-        modelStatus.className = 'text-xs text-red-600 dark:text-red-400';
+      }
+
+      pdfEmpty.hidden = true;
+      pdfFrame.hidden = true;
+      pdfJsView.hidden = false;
+      return true;
+    } catch (err) {
+      console.warn("PDF.js render failed, falling back to iframe", err);
+      if (typeof showToast === "function") {
+        showToast("无法高亮摘录，已打开原页");
+      }
+      return false;
     }
-}
+  }
 
-// 设置相关
-function openSettings() {
-    showToast('设置功能开发中...');
-}
+  async function openCitedPdf(docName, pageNumber, source, index, opts) {
+    opts = opts || {};
+    const hit = resolvePdfByName(docName);
+    if (!hit || !hit.url) {
+      if (opts.forceEmpty !== false && !lastStickyView) {
+        hidePdfViews();
+        pdfSelect.hidden = true;
+        pageBadge.hidden = true;
+        pdfTitle.textContent = "引用原文";
+        pdfSubtitle.textContent = "暂未匹配到可打开的条款 PDF";
+        setEvidence(null);
+      }
+      return false;
+    }
 
-// 历史记录刷新
-function refreshHistory() {
-    loadChatHistory();
-    showToast('历史记录已刷新');
-}
+    const page =
+      pageNumber != null && pageNumber !== "" && !Number.isNaN(Number(pageNumber))
+        ? Number(pageNumber)
+        : null;
+    const excerpt = cleanExcerpt(
+      (source && (source.content || source.excerpt || source.text)) || ""
+    );
 
-// 导出功能
-function exportChat() {
-    showToast('导出功能开发中...');
-}
+    currentView = {
+      name: hit.name,
+      url: hit.url,
+      page: page,
+      index: index || null,
+      excerpt: excerpt,
+    };
+    lastStickyView = Object.assign({}, currentView, {
+      source: source || null,
+      display: hit.display_name || displayNameFor(hit.name, source || {}),
+    });
 
-// 分享功能占位
-function shareChat() {
-    showToast('分享功能开发中...');
-}
-
-// 分析功能
-function toggleAnalysis() {
-    showToast('分析功能开发中...');
-}
-
-// 主题切换功能
-function toggleTheme() {
-    const html = document.documentElement;
-    const themeIcon = document.getElementById('themeIcon');
-    
-    if (html.classList.contains('dark')) {
-        // 切换到浅色主题
-        html.classList.remove('dark');
-        themeIcon.className = 'fas fa-sun text-gray-600 dark:text-gray-400';
-        localStorage.setItem('theme', 'light');
+    const nice = hit.display_name || displayNameFor(hit.name, source || {});
+    pdfTitle.textContent = nice;
+    pdfSubtitle.textContent = page
+      ? "定位到引用页 p." + page
+      : "答案引用的条款原文";
+    if (page) {
+      pageBadge.hidden = false;
+      pageBadge.textContent = "p." + page;
     } else {
-        // 切换到深色主题
-        html.classList.add('dark');
-        themeIcon.className = 'fas fa-moon text-gray-600 dark:text-gray-400';
-        localStorage.setItem('theme', 'dark');
+      pageBadge.hidden = true;
+      pageBadge.textContent = "";
     }
-}
 
-// 初始化主题
-function initializeTheme() {
-    const savedTheme = localStorage.getItem('theme');
-    const html = document.documentElement;
-    const themeIcon = document.getElementById('themeIcon');
-    
-    if (savedTheme === 'light') {
-        html.classList.remove('dark');
-        if (themeIcon) {
-            themeIcon.className = 'fas fa-sun text-gray-600 dark:text-gray-400';
-        }
-    } else {
-        // 默认使用深色主题
-        html.classList.add('dark');
-        if (themeIcon) {
-            themeIcon.className = 'fas fa-moon text-gray-600 dark:text-gray-400';
-        }
+    if (pdfs.length) {
+      pdfSelect.hidden = false;
+      pdfSelect.innerHTML = pdfs
+        .map(function (p) {
+          const sel = p.url === hit.url ? " selected" : "";
+          const label = p.display_name || displayNameFor(p.name, p);
+          return (
+            '<option value="' +
+            escapeHtml(p.url) +
+            '"' +
+            sel +
+            ">" +
+            escapeHtml(label) +
+            "</option>"
+          );
+        })
+        .join("");
     }
-}
+
+    if (source) setEvidence(source, index);
+
+    const ok = await renderPdfJs(hit.url, page || 1, excerpt);
+    if (!ok) {
+      // iframe fallback
+      const hash = page && page > 0 ? "#page=" + page : "";
+      const nextSrc = hit.url + hash;
+      pdfEmpty.hidden = true;
+      if (pdfJsView) pdfJsView.hidden = true;
+      pdfFrame.hidden = false;
+      if (pdfFrame.getAttribute("src") !== nextSrc) {
+        pdfFrame.src = nextSrc;
+      }
+    }
+    return true;
+  }
+
+  function firstAnswerCiteIndex(answerText) {
+    const m = String(answerText || "").match(/\[(\d+)\]/);
+    if (!m) return 1;
+    const n = parseInt(m[1], 10);
+    return n > 0 ? n : 1;
+  }
+
+  function followAnswerCitation(sources, answerText, opts) {
+    opts = opts || {};
+    activeSources = Array.isArray(sources) ? sources : [];
+    if (!activeSources.length) {
+      // P3 stickiness: keep last citation unless forced clear
+      if (lastStickyView && !opts.forceClear) {
+        pdfTitle.textContent = lastStickyView.display || "引用原文";
+        pdfSubtitle.textContent = "沿用上一轮引用（本轮无新引用）";
+        return;
+      }
+      pdfTitle.textContent = "引用原文";
+      pdfSubtitle.textContent = "本次回答没有可用引用";
+      setEvidence(null);
+      return;
+    }
+    let idx = firstAnswerCiteIndex(answerText);
+    if (idx > activeSources.length) idx = 1;
+
+    // P3: if same first cite as current, keep view (avoid flicker)
+    const src = activeSources[idx - 1];
+    const nextName = basename(src.document_name || src.source || src.filename || "");
+    const nextPage = src.page_number ?? src.page;
+    if (
+      lastStickyView &&
+      basename(lastStickyView.name || "") === nextName &&
+      Number(lastStickyView.page) === Number(nextPage) &&
+      !opts.force
+    ) {
+      setEvidence(src, idx);
+      return;
+    }
+    openCitedPdf(
+      src.document_name || src.source || src.filename,
+      src.page_number ?? src.page,
+      src,
+      idx,
+      {}
+    );
+  }
+
+  function setLoading(v, stage) {
+    isLoading = v;
+    sendBtn.disabled = v || !String(input.value || "").trim();
+    if (genPill) {
+      genPill.hidden = !v;
+      if (v) setStatus(stage || "generate");
+    }
+    if (stopBtn) stopBtn.hidden = !v;
+    const lastIcon = messagesEl.querySelector(
+      ".message.is-assistant:last-child .message-icon"
+    );
+    if (lastIcon) lastIcon.classList.toggle("spin", v);
+  }
+
+  function showError(msg) {
+    if (!errPill) return;
+    if (!msg) {
+      errPill.hidden = true;
+      errPill.textContent = "";
+      return;
+    }
+    errPill.hidden = false;
+    errPill.textContent = "错误：" + msg;
+  }
+
+  function showToast(msg, ms) {
+    ms = ms || 3200;
+    let el = document.getElementById("uiToast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "uiToast";
+      el.className = "ui-toast";
+      el.hidden = true;
+      document.body.appendChild(el);
+    }
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      return;
+    }
+    el.textContent = msg;
+    el.hidden = false;
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(function () {
+      el.hidden = true;
+    }, ms);
+  }
+
+  function setStatus(stage) {
+    if (!genPill) return;
+    const map = {
+      retrieve: "检索中",
+      generate: "生成中",
+      done: "完成",
+      idle: "生成中",
+    };
+    const texts = genPill.querySelectorAll("span");
+    if (texts && texts.length) texts[0].textContent = map[stage] || "生成中";
+  }
+
+
+  async function loadCorpus() {
+    try {
+      const res = await fetch("/api/v1/corpus");
+      if (!res.ok) throw new Error("语料接口 " + res.status);
+      const data = await res.json();
+      const docs = data.documents || [];
+      pdfs = docs
+        .map(function (d) {
+          const name = d.name || d.document_name || d.filename || "document.pdf";
+          let url = d.url;
+          if (!url && name) url = "/samples/" + encodeURIComponent(name);
+          return {
+            name: name,
+            url: url,
+            pages: d.pages,
+            display_name:
+              d.display_name || DISPLAY_FALLBACK[basename(name)] || null,
+          };
+        })
+        .filter(function (p) {
+          return !!p.url;
+        });
+
+      const chunks = data.chunk_count != null ? data.chunk_count : "—";
+      corpusMeta.textContent = pdfs.length + " 份文档 · " + chunks + " 片段";
+    } catch (err) {
+      corpusMeta.textContent = "语料加载失败";
+      showError(err.message || String(err));
+    }
+  }
+
+  async function loadHealth() {
+    try {
+      const res = await fetch("/api/v1/health/");
+      if (!res.ok) throw new Error("health " + res.status);
+      const data = await res.json();
+      const st = (data.status || "ok").toLowerCase();
+      healthText.textContent =
+        st === "healthy" || st === "ok" ? "服务正常" : st;
+    } catch (_e) {
+      healthText.textContent = "离线";
+    }
+  }
+
+  function linkCitations(escapedText) {
+    return escapedText.replace(/\[(\d+)\]/g, function (_m, n) {
+      return (
+        '<button type="button" class="cite-ref" data-cite-index="' +
+        n +
+        '" title="打开引用 [' +
+        n +
+        ']">[' +
+        n +
+        "]</button>"
+      );
+    });
+  }
+
+  function formatAnswerHtml(text) {
+    const raw = String(text || "");
+    const sectionRe =
+      /【\s*(结论|条款依据|不确定[/／]?边界|边界)\s*】\s*([\s\S]*?)(?=【\s*(?:结论|条款依据|不确定[/／]?边界|边界)\s*】|$)/g;
+    const parts = [];
+    let m;
+    while ((m = sectionRe.exec(raw)) !== null) {
+      parts.push({ title: m[1], body: (m[2] || "").trim() });
+    }
+    if (parts.length >= 2) {
+      const blocks = parts
+        .map(function (p) {
+          let kind = "is-evidence";
+          let label = p.title;
+          if (p.title.indexOf("结论") >= 0) {
+            kind = "is-conclusion";
+            label = "结论";
+          } else if (p.title.indexOf("依据") >= 0) {
+            kind = "is-evidence";
+            label = "条款依据";
+          } else {
+            kind = "is-boundary";
+            label = "不确定 / 边界";
+          }
+          return (
+            '<section class="answer-section ' +
+            kind +
+            '"><div class="answer-section-label">' +
+            escapeHtml(label) +
+            '</div><div class="answer-section-body">' +
+            linkCitations(escapeHtml(p.body)) +
+            "</div></section>"
+          );
+        })
+        .join("");
+      return '<div class="answer-sections">' + blocks + "</div>";
+    }
+
+    return linkCitations(
+      escapeHtml(raw).replace(
+        /^(【[^】]+】|[一二三四五六七八九十]+[、.．]|结论|条款依据|不确定[/／]?边界)([^\n]*)/gm,
+        function (_mm, head, rest) {
+          return '<span class="sec-head">' + head + (rest || "") + "</span>";
+        }
+      )
+    );
+  }
+
+  function debugPanelHtml(sources, meta) {
+    if (!debugMode) return "";
+    meta = meta || {};
+    const rows = (sources || [])
+      .map(function (s, i) {
+        return (
+          "<tr><td>" +
+          (i + 1) +
+          "</td><td>" +
+          escapeHtml(String(s.chunk_id != null ? s.chunk_id : "—")) +
+          "</td><td>" +
+          escapeHtml(
+            String(
+              s.similarity_score != null
+                ? Number(s.similarity_score).toFixed(4)
+                : "—"
+            )
+          ) +
+          "</td><td>" +
+          escapeHtml(basename(s.document_name || "")) +
+          "</td><td>p." +
+          escapeHtml(String(s.page_number ?? s.page ?? "—")) +
+          "</td></tr>"
+        );
+      })
+      .join("");
+    return (
+      '<details class="debug-panel"><summary>调试 · chunk_id / 分数' +
+      (meta.embedding_provider
+        ? " · " + escapeHtml(meta.embedding_provider)
+        : lastEmbeddingProvider
+          ? " · " + escapeHtml(lastEmbeddingProvider)
+          : "") +
+      (meta.answer_kind ? " · kind=" + escapeHtml(meta.answer_kind) : "") +
+      "</summary><table class=\"debug-table\"><thead><tr><th>#</th><th>chunk_id</th><th>score</th><th>doc</th><th>page</th></tr></thead><tbody>" +
+      (rows || "<tr><td colspan=5>无片段</td></tr>") +
+      "</tbody></table></details>"
+    );
+  }
+
+  function citationsHtml(sources, groupId) {
+    if (!sources || !sources.length) return "";
+    const visible = sources.filter(function (s) {
+      if (s == null) return false;
+      if (s.similarity_score == null || s.similarity_score === "") return true;
+      const n = Number(s.similarity_score);
+      return !(Number.isFinite(n) && n <= 0);
+    });
+    if (!visible.length) return "";
+    const cards = visible
+      .map(function (s, i) {
+        const name = displayNameFor(
+          s.document_name || s.source || s.filename || "doc",
+          s
+        );
+        const page = s.page_number ?? s.page ?? "—";
+        const excerpt = cleanExcerpt(s.content || s.excerpt || s.text || "");
+        let score = "";
+        if (s.similarity_score != null && s.similarity_score !== "") {
+          const n = Number(s.similarity_score);
+          if (Number.isFinite(n) && n > 0) score = n.toFixed(3);
+        }
+        return (
+          '<button type="button" class="cite-card" data-cite-index="' +
+          (i + 1) +
+          '" data-cite-group="' +
+          groupId +
+          '">' +
+          '<div class="cite-card-top">' +
+          '<span class="cite-idx">[' +
+          (i + 1) +
+          "]</span>" +
+          '<span class="cite-doc">' +
+          escapeHtml(name) +
+          "</span>" +
+          '<span class="cite-page">p.' +
+          escapeHtml(String(page)) +
+          "</span>" +
+          (debugMode && score
+            ? '<span class="cite-score">' + escapeHtml(score) + "</span>"
+            : "") +
+          "</div>" +
+          '<div class="cite-excerpt">' +
+          escapeHtml(excerpt) +
+          "</div></button>"
+        );
+      })
+      .join("");
+    return (
+      '<div class="citations" data-cite-group="' +
+      groupId +
+      '"><div class="citations-title">来源 · ' +
+      visible.length +
+      " · 点击打开左侧原文</div>" +
+      cards +
+      "</div>"
+    );
+  }
+
+  function ensureMessagesVisible() {
+    emptyChat.hidden = true;
+    emptyChat.setAttribute("aria-hidden", "true");
+    messagesEl.hidden = false;
+  }
+
+  function kindClass(kind) {
+    const k = String(kind || "answer").toLowerCase();
+    if (k === "refusal" || k === "insufficient_evidence") return "is-refusal";
+    if (k === "advice") return "is-advice";
+    if (k === "llm_unavailable") return "is-llm-unavailable";
+    if (k === "degraded") return "is-degraded";
+    return "is-answer";
+  }
+
+  function kindBadge(kind) {
+    const k = String(kind || "answer").toLowerCase();
+    const map = {
+      refusal: "拒答 / 无充分依据",
+      insufficient_evidence: "拒答 / 无充分依据",
+      advice: "边界 / 不构成建议",
+      llm_unavailable: "LLM 不可用 · 仅检索",
+      degraded: "降级响应",
+      answer: "",
+    };
+    const label = map[k] || "";
+    if (!label) return "";
+    return (
+      '<div class="kind-badge">' + escapeHtml(label) + "</div>"
+    );
+  }
+
+  function appendMessage(role, html, extraClass) {
+    ensureMessagesVisible();
+    const div = document.createElement("div");
+    div.className =
+      "message is-" + role + (extraClass ? " " + extraClass : "");
+    const icon =
+      role === "user"
+        ? '<svg class="message-icon" viewBox="0 0 24 24" width="18" height="18" fill="#1D9CFF"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/></svg>'
+        : '<svg class="message-icon" viewBox="0 0 24 24" width="18" height="18" fill="#1D9CFF"><path d="M12 2l1.2 3.6L17 7l-3.8 1.2L12 12l-1.2-3.8L7 7l3.8-1.4L12 2zm6.5 9l.8 2.3 2.2.7-2.2.7-.8 2.3-.8-2.3-2.2-.7 2.2-.7.8-2.3z"/></svg>';
+    // Safe: fixed SVG icon + pre-escaped/composed html only.
+    div.innerHTML =
+      '<div class="message-row">' +
+      icon +
+      '<div class="message-body">' +
+      html +
+      "</div></div>";
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+
+  function setAssistantBody(row, answerText, sources, meta) {
+    meta = meta || {};
+    const body = row.querySelector(".message-body");
+    if (!body) return;
+    citeSeq += 1;
+    const groupId = "g" + citeSeq;
+    row.dataset.citeGroup = groupId;
+    row._sources = sources || [];
+    row._answerText = answerText || "";
+    row._meta = meta;
+
+    const kind = meta.answer_kind || "answer";
+    row.classList.remove(
+      "is-pending",
+      "is-refusal",
+      "is-advice",
+      "is-llm-unavailable",
+      "is-degraded",
+      "is-answer"
+    );
+    row.classList.add(kindClass(kind));
+
+    // During stream we may pass preformatted; for final always rebuild
+    body.innerHTML =
+      kindBadge(kind) +
+      formatAnswerHtml(answerText || "") +
+      citationsHtml(sources || [], groupId) +
+      debugPanelHtml(sources || [], meta);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    // P1: only open PDF/evidence after final setAssistantBody (never mid-stream)
+    if (sources && sources.length) {
+      followAnswerCitation(sources, answerText || {}, { force: false });
+      const idx = firstAnswerCiteIndex(answerText);
+      highlightActiveCite(groupId, Math.min(idx, sources.length || 1));
+    } else {
+      followAnswerCitation([], answerText || "", { forceClear: false });
+    }
+
+    if (meta.embedding_provider) {
+      lastEmbeddingProvider = meta.embedding_provider;
+      if (embedMeta) {
+        embedMeta.textContent = "embed:" + meta.embedding_provider;
+      }
+    }
+  }
+
+  function highlightActiveCite(groupId, index) {
+    document.querySelectorAll(".cite-card.is-active").forEach(function (el) {
+      el.classList.remove("is-active");
+    });
+    if (!groupId || !index) return;
+    const card = document.querySelector(
+      '.cite-card[data-cite-group="' +
+        groupId +
+        '"][data-cite-index="' +
+        index +
+        '"]'
+    );
+    if (card) {
+      card.classList.add("is-active");
+      try {
+        card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch (e) {}
+    }
+  }
+
+  function activateCitation(index, sources, groupId) {
+    const list = sources || activeSources || [];
+    const i = Number(index) - 1;
+    if (i < 0 || i >= list.length) return;
+    const s = list[i];
+    openCitedPdf(
+      s.document_name || s.source || s.filename,
+      s.page_number ?? s.page,
+      s,
+      Number(index),
+      {}
+    );
+    highlightActiveCite(groupId, index);
+  }
+
+  function normalizeSources(data) {
+    if (!data) return [];
+    let list = [];
+    if (Array.isArray(data.retrieved_chunks) && data.retrieved_chunks.length) {
+      list = data.retrieved_chunks;
+    } else if (Array.isArray(data.sources)) {
+      list = data.sources;
+    } else if (Array.isArray(data.citations)) {
+      list = data.citations;
+    }
+    return list.slice(0, 4);
+  }
+
+  function responseMeta(data) {
+    data = data || {};
+    return {
+      answer_kind: data.answer_kind || "answer",
+      embedding_provider: data.embedding_provider || lastEmbeddingProvider,
+      confidence_score: data.confidence_score,
+    };
+  }
+
+  async function askOnce(question) {
+    const res = await fetch("/api/v1/queries/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: question,
+        stream: false,
+        show_sources: true,
+        session_id: sessionId,
+      }),
+      signal: abortController ? abortController.signal : undefined,
+    });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok && !data.answer) {
+      throw new Error(data.detail || data.message || "提问失败 " + res.status);
+    }
+    return data;
+  }
+
+  async function askStream(question, onDelta, onFinal) {
+    const res = await fetch("/api/v1/queries/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: question,
+        stream: true,
+        show_sources: true,
+        session_id: sessionId,
+      }),
+      signal: abortController ? abortController.signal : undefined,
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(function () {
+        return {};
+      });
+      throw new Error(
+        errData.detail || errData.message || "流式失败 " + res.status
+      );
+    }
+    if (!res.body || !res.body.getReader) {
+      onFinal(await res.json());
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let full = "";
+    let finalPayload = null;
+    // P1: ignore mid-stream context/chunks — only use end/final for citations+PDF
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n");
+      buffer = parts.pop() || "";
+      for (let i = 0; i < parts.length; i++) {
+        let line = parts[i].trim();
+        if (!line) continue;
+        if (line.startsWith("data:")) line = line.slice(5).trim();
+        if (!line || line === "[DONE]") continue;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === "token" || obj.delta || obj.token) {
+            full += obj.token || obj.delta || obj.content || "";
+            onDelta(full);
+          } else if (obj.type === "context") {
+            // intentionally ignore mid-stream chunks (prevent left-pane flash)
+          } else if (
+            obj.type === "end" ||
+            obj.type === "final" ||
+            obj.answer ||
+            (obj.retrieved_chunks && obj.type !== "context")
+          ) {
+            finalPayload = obj.data || obj;
+            if (obj.answer || obj.type === "end") finalPayload = obj;
+            if (obj.answer && !full) full = obj.answer;
+          }
+        } catch (_e) {
+          // non-json lines: treat as token only if look like plain text
+          if (line[0] !== "{" && line[0] !== "[") {
+            full += line;
+            onDelta(full);
+          }
+        }
+      }
+    }
+    if (finalPayload && !finalPayload.answer && full) {
+      finalPayload.answer = full;
+    }
+    onFinal(finalPayload || { answer: full, retrieved_chunks: [] });
+  }
+
+  async function handleAsk(question) {
+    const q = String(question || "").trim();
+    if (!q || isLoading) return;
+    showError("");
+    setLoading(true, "retrieve");
+    abortController = new AbortController();
+    ensureMessagesVisible();
+    appendMessage("user", escapeHtml(q));
+    const assistantRow = appendMessage("assistant", "…", "is-pending");
+    setStatus("generate");
+
+    try {
+      if (streamToggle && streamToggle.checked) {
+        await askStream(
+          q,
+          function (partial) {
+            setStatus("generate");
+            const body = assistantRow.querySelector(".message-body");
+            // P1: mid-stream tokens only — no citations, no PDF open
+            if (body) body.innerHTML = formatAnswerHtml(partial);
+          },
+          function (data) {
+            setAssistantBody(
+              assistantRow,
+              data.answer || data.response || "",
+              normalizeSources(data),
+              responseMeta(data)
+            );
+          }
+        );
+      } else {
+        const data = await askOnce(q);
+        setAssistantBody(
+          assistantRow,
+          data.answer || data.response || "（空响应）",
+          normalizeSources(data),
+          responseMeta(data)
+        );
+      }
+    } catch (err) {
+      if (err.name === "AbortError") {
+        setAssistantBody(assistantRow, "已停止。", [], { answer_kind: "degraded" });
+      } else {
+        showError(err.message || String(err));
+        setAssistantBody(
+          assistantRow,
+          "请求失败：" + (err.message || String(err)),
+          [],
+          { answer_kind: "degraded" }
+        );
+      }
+    } finally {
+      setLoading(false);
+      abortController = null;
+      input.value = "";
+      input.focus();
+      sendBtn.disabled = true;
+    }
+  }
+
+  function resetChat() {
+    if (abortController) abortController.abort();
+    setLoading(false);
+    showError("");
+    messagesEl.innerHTML = "";
+    messagesEl.hidden = true;
+    emptyChat.hidden = false;
+    emptyChat.removeAttribute("aria-hidden");
+    activeSources = [];
+    lastStickyView = null;
+    currentView = { name: null, url: null, page: null, index: null, excerpt: "" };
+    hidePdfViews();
+    pdfSelect.hidden = true;
+    pageBadge.hidden = true;
+    pdfTitle.textContent = "引用原文";
+    pdfSubtitle.textContent = "提问后自动打开答案引用的条款 PDF";
+    setEvidence(null);
+    input.value = "";
+    sendBtn.disabled = true;
+    input.focus();
+  }
+
+  messagesEl.addEventListener("click", function (e) {
+    const ref = e.target.closest(".cite-ref, .cite-card");
+    if (!ref) return;
+    e.preventDefault();
+    const idx = ref.getAttribute("data-cite-index");
+    const groupId =
+      ref.getAttribute("data-cite-group") ||
+      (ref.closest(".message") && ref.closest(".message").dataset.citeGroup);
+    const row = ref.closest(".message");
+    const sources = (row && row._sources) || activeSources;
+    activateCitation(idx, sources, groupId);
+  });
+
+  pdfSelect.addEventListener("change", function () {
+    const url = pdfSelect.value;
+    const hit = pdfs.find(function (p) {
+      return p.url === url;
+    });
+    if (!hit) return;
+    const match =
+      activeSources.find(function (s) {
+        return (
+          basename(s.document_name || "").toLowerCase() ===
+          basename(hit.name).toLowerCase()
+        );
+      }) || null;
+    openCitedPdf(
+      hit.name,
+      (match && (match.page_number ?? match.page)) || currentView.page || null,
+      match || { document_name: hit.name, content: "" },
+      currentView.index || 1,
+      {}
+    );
+  });
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    handleAsk(input.value);
+  });
+
+  input.addEventListener("input", function () {
+    sendBtn.disabled = isLoading || !String(input.value || "").trim();
+  });
+
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (String(input.value || "").trim()) handleAsk(input.value);
+    }
+  });
+
+  resetBtn.addEventListener("click", function (e) {
+    e.preventDefault();
+    resetChat();
+  });
+
+  stopBtn.addEventListener("click", function (e) {
+    e.preventDefault();
+    if (abortController) abortController.abort();
+  });
+
+  if (debugToggle) {
+    debugToggle.addEventListener("click", function (e) {
+      e.preventDefault();
+      debugMode = !debugMode;
+      debugToggle.classList.toggle("is-active", debugMode);
+      debugToggle.textContent = debugMode ? "调试开" : "调试";
+      // Re-render last assistant bodies if any
+      document.querySelectorAll(".message.is-assistant").forEach(function (row) {
+        if (row._answerText != null) {
+          setAssistantBody(row, row._answerText, row._sources || [], row._meta || {});
+        }
+      });
+    });
+  }
+
+  document.querySelectorAll(".prompt-chip").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      handleAsk(btn.getAttribute("data-q") || btn.textContent);
+    });
+  });
+
+  (function setupResize() {
+    let dragging = false;
+    resizeHandle.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      dragging = true;
+      document.body.style.cursor =
+        window.innerWidth <= 860 ? "row-resize" : "col-resize";
+      document.body.style.userSelect = "none";
+    });
+    window.addEventListener("mouseup", function () {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    });
+    window.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      const rect = panelGroup.getBoundingClientRect();
+      const isVertical = window.innerWidth <= 860;
+      if (isVertical) {
+        const y = e.clientY - rect.top;
+        const ratio = Math.min(0.78, Math.max(0.22, y / rect.height));
+        pdfPanel.style.flex = "0 0 " + ratio * 100 + "%";
+        aiPanel.style.flex = "0 0 " + (1 - ratio) * 100 + "%";
+      } else {
+        const x = e.clientX - rect.left;
+        const ratio = Math.min(0.72, Math.max(0.28, x / rect.width));
+        pdfPanel.style.flex = "0 0 " + ratio * 100 + "%";
+        aiPanel.style.flex = "1 1 " + (1 - ratio) * 100 + "%";
+      }
+    });
+  })();
+
+  loadCorpus();
+  loadHealth();
+  sendBtn.disabled = true;
+})();

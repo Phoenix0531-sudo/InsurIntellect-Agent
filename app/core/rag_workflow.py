@@ -26,10 +26,14 @@ from typing import Dict, List, Any, Tuple
 from datetime import datetime
 import asyncio
 
-# 在导入langchain之前设置环境变量
+# 在导入langchain之前设置环境变量（OpenAI-compatible；兼容 siliconflow 回退）
 from app.core.config import settings
-os.environ["OPENAI_API_KEY"] = settings.SILICONFLOW_API_KEY  # 使用硅基流动的API密钥
-os.environ["OPENAI_BASE_URL"] = settings.SILICONFLOW_BASE_URL  # 使用硅基流动的基础URL
+_api_key = settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY or ""
+_base_url = settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL or ""
+if _api_key:
+    os.environ["OPENAI_API_KEY"] = _api_key
+if _base_url:
+    os.environ["OPENAI_BASE_URL"] = _base_url
 
 from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document
@@ -60,6 +64,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+
+def _normalize_vector_score(score: float) -> float:
+    """Map raw vector score/distance into roughly [0,1] cosine-like similarity."""
+    try:
+        s = float(score)
+    except Exception:
+        return 0.0
+    if 0.0 <= s <= 1.0:
+        return s
+    # LangChain/Chroma may return distance (lower better). Cosine distance often in [0, 2].
+    if s > 1.0:
+        if s <= 2.0:
+            return max(0.0, min(1.0, 1.0 - s))
+        return max(0.0, min(1.0, 1.0 / (1.0 + s)))
+    # negative unexpected
+    return 0.0
+
+
 class InsurIntellectAgent:
     """
     InsurIntellect智能代理核心类
@@ -81,13 +103,19 @@ class InsurIntellectAgent:
         logger.info("正在初始化InsurIntellect智能代理...")
         
         try:
-            # 初始化ChatOpenAI LLM（兼容硅基流动）
+            # 初始化 ChatOpenAI（OpenAI-compatible；兼容 siliconflow 回退）
+            _model = (
+                settings.OPENAI_MODEL_CORE
+                or settings.OPENAI_MODEL
+                or settings.SILICONFLOW_MODEL
+                or "gpt-5.4"
+            )
             self.llm = ChatOpenAI(
-                model=settings.SILICONFLOW_MODEL,  # 使用硅基流动的模型
+                model=_model,
                 temperature=settings.OPENAI_TEMPERATURE,
                 max_tokens=settings.OPENAI_MAX_TOKENS,
-                api_key=settings.SILICONFLOW_API_KEY,  # 显式传递API密钥
-                base_url=settings.SILICONFLOW_BASE_URL  # 显式传递基础URL
+                api_key=settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY,
+                base_url=settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL,
             )
             logger.info("ChatOpenAI LLM初始化成功")
             
@@ -817,13 +845,25 @@ class InsurIntellectAgent:
                 for doc in top_docs:
                     md = doc.metadata or {}
                     rd = md.get("ranking_details", {})
+                    # prefer vector cosine over rrf for UI + refusal gate
+                    sim = (
+                        rd.get("original_similarity")
+                        or md.get("vector_score")
+                        or md.get("rrf_score")
+                        or md.get("bm25_score")
+                        or 0.0
+                    )
+                    try:
+                        sim = float(sim)
+                    except Exception:
+                        sim = 0.0
                     retrieved_chunks.append({
                         "chunk_id": md.get("chunk_id"),
                         "document_id": md.get("document_id"),
                         "document_name": md.get("document_title") or md.get("filename") or md.get("source"),
                         "content": doc.page_content,
                         "page_number": md.get("page_number"),
-                        "similarity_score": rd.get("original_similarity"),
+                        "similarity_score": sim,
                         "metadata": {
                             "ranking_details": rd,
                             "document_type": md.get("document_type"),
@@ -884,10 +924,14 @@ class InsurIntellectAgent:
                     rewritten_query = user_query
             standalone_query = rewritten_query
 
-            # 意图分类（KCP-FIX-4）：在重写后进行
+            # 意图分类：SIMPLE_RAG_MODE 下跳过，避免主路径额外 LLM 调用
             metadata_filter: Dict[str, Any] | None = None
             try:
-                if hasattr(self, "intent_service") and self.intent_service is not None:
+                if (
+                    not getattr(settings, "SIMPLE_RAG_MODE", True)
+                    and hasattr(self, "intent_service")
+                    and self.intent_service is not None
+                ):
                     intent: QueryIntent = await self.intent_service.classify_intent(rewritten_query)
                     metadata_filter = intent.metadata_filter or None
                     logger.info(f"意图分类：{intent.intent}，应用过滤器：{metadata_filter}")
@@ -933,7 +977,7 @@ class InsurIntellectAgent:
                         cid = (doc.metadata or {}).get("chunk_id")
                         if cid:
                             ids.append(cid)
-                            score_map[cid] = float(score)
+                            score_map[cid] = _normalize_vector_score(score)
                     return results, score_map, ids
                 except Exception:
                     # 回退：使用底层 Chroma collection 查询距离
@@ -957,7 +1001,7 @@ class InsurIntellectAgent:
                             md = payload["metadatas"][0][i]
                             dist = payload["distances"][0][i]
                             # 以(1 - 距离)作为相似度近似
-                            score = 1.0 - float(dist)
+                            score = _normalize_vector_score(1.0 - float(dist))
                             d = Document(page_content=text, metadata=md)
                             docs.append((d, score))
                             ids.append(cid)
@@ -1056,13 +1100,25 @@ class InsurIntellectAgent:
                     md["bm25_score"] = bm25_score_map.get(cid)
                     md["rrf_score"] = rrf_scores.get(cid)
                     rd = md.get("ranking_details", {})
+                    # prefer vector cosine over rrf for UI + refusal gate
+                    sim = (
+                        rd.get("original_similarity")
+                        or md.get("vector_score")
+                        or md.get("rrf_score")
+                        or md.get("bm25_score")
+                        or 0.0
+                    )
+                    try:
+                        sim = float(sim)
+                    except Exception:
+                        sim = 0.0
                     retrieved_chunks.append({
                         "chunk_id": md.get("chunk_id"),
                         "document_id": md.get("document_id"),
                         "document_name": md.get("document_title") or md.get("filename") or md.get("source"),
                         "content": doc.page_content,
                         "page_number": md.get("page_number"),
-                        "similarity_score": rd.get("original_similarity"),
+                        "similarity_score": sim,
                         "metadata": {
                             "ranking_details": rd,
                             "document_type": md.get("document_type"),
@@ -1204,13 +1260,25 @@ class InsurIntellectAgent:
                 for doc in top_docs:
                     md = doc.metadata or {}
                     rd = md.get("ranking_details", {})
+                    # prefer vector cosine over rrf for UI + refusal gate
+                    sim = (
+                        rd.get("original_similarity")
+                        or md.get("vector_score")
+                        or md.get("rrf_score")
+                        or md.get("bm25_score")
+                        or 0.0
+                    )
+                    try:
+                        sim = float(sim)
+                    except Exception:
+                        sim = 0.0
                     retrieved_chunks.append({
                         "chunk_id": md.get("chunk_id"),
                         "document_id": md.get("document_id"),
                         "document_name": md.get("document_title") or md.get("filename") or md.get("source"),
                         "content": doc.page_content,
                         "page_number": md.get("page_number"),
-                        "similarity_score": rd.get("original_similarity"),
+                        "similarity_score": sim,
                         "metadata": {
                             "ranking_details": rd,
                             "document_type": md.get("document_type"),

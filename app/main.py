@@ -277,6 +277,15 @@ static_dir = Path(__file__).parent.parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+# Sample / corpus PDFs for ChatPDF-style left viewer (chat-pdf fileUrl pattern)
+_repo_root = Path(__file__).parent.parent
+_samples_dir = _repo_root / "samples"
+if _samples_dir.exists():
+    app.mount("/samples", StaticFiles(directory=str(_samples_dir)), name="samples")
+_pdf_storage = Path(getattr(settings, "PDF_STORAGE_PATH", _repo_root / "data" / "documents" / "pdfs"))
+if _pdf_storage.exists():
+    app.mount("/corpus-pdfs", StaticFiles(directory=str(_pdf_storage)), name="corpus_pdfs")
+
 
 if __name__ == "__main__":
     import uvicorn
