@@ -72,6 +72,34 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8766
 **做**：本地条款语料、混合检索、引用回答、拒答与降级、证据型 UI。  
 **不做**：持牌建议、理赔承诺、完整 PDF 阅读器、多租户登录；KG/SQL 产品化（代码可保留为 advanced）。
 
+
+<!-- polish-demo-notes -->
+## 演示启动（强制 embedding）
+
+Shell 环境可能污染 `.env`。启动时务必强制与入库相同的向量模型：
+
+```bash
+export OPENAI_EMBEDDING_MODEL=hf:BAAI/bge-small-zh-v1.5
+export SIMILARITY_THRESHOLD=0.32
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+bash scripts/run_demo.sh
+# Windows: scripts\run_demo.bat
+```
+
+更换 embedding 后必须重新入库：
+
+```bash
+PYTHONPATH=. .venv/Scripts/python.exe scripts/simple_ingest.py --reset
+```
+
+固定回归（服务需已启动）：
+
+```bash
+.venv/Scripts/python.exe scripts/demo_smoke.py
+```
+
+Docker 可选（`Dockerfile` 默认暴露 8000）。作品集本地演示优先 `uv` + **8766**，不要绑死 Docker。
+
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。

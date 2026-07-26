@@ -103,6 +103,34 @@ CI runs the same critical ruff select set + `pytest tests/` without requiring li
 - Regulated advice, guaranteed claim outcomes, multi-tenant auth, full PDF.js reader
 - Productized text-to-SQL / knowledge-graph UI (code may exist as advanced/off by default)
 
+
+<!-- polish-demo-notes -->
+## Demo launch (forced embedding)
+
+Shell environment may override `.env`. Always force the same embedding model used at ingest:
+
+```bash
+export OPENAI_EMBEDDING_MODEL=hf:BAAI/bge-small-zh-v1.5
+export SIMILARITY_THRESHOLD=0.32
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+bash scripts/run_demo.sh
+# Windows: scripts\run_demo.bat
+```
+
+If you change the embedding model, re-ingest:
+
+```bash
+PYTHONPATH=. .venv/Scripts/python.exe scripts/simple_ingest.py --reset
+```
+
+Regression smoke (server must be up):
+
+```bash
+.venv/Scripts/python.exe scripts/demo_smoke.py
+```
+
+Docker is optional (`Dockerfile` exposes 8000 by default). Local portfolio demo prefers `uv` + port **8766**, not Docker-only.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

@@ -140,3 +140,51 @@ def test_curate_citations_filters_cover_and_dedupes():
     # same doc+page deduped
     keys = {(c.get("document_name"), c.get("page_number")) for c in out}
     assert len(keys) == len(out)
+
+
+
+def test_public_citations_policy():
+    from app.services.query_service import QueryService
+
+    svc = QueryService()
+    raw = [
+        {
+            "chunk_id": 1,
+            "document_name": "sample_critical_illness.pdf",
+            "content": "本合同等待期为九十天。等待期内出险不承担保险责任。",
+            "page_number": 2,
+            "similarity_score": 0.81,
+        },
+        {
+            "chunk_id": 2,
+            "document_name": "sample_critical_illness.pdf",
+            "content": "文档名称：示例\n产品名称：演示\n状态：演示样本",
+            "page_number": 1,
+            "similarity_score": 0.05,
+        },
+        {
+            "chunk_id": 3,
+            "document_name": "pad.pdf",
+            "content": "filler",
+            "page_number": 1,
+            "similarity_score": 0.0,
+        },
+    ]
+    pub = svc.public_citations(raw)
+    assert all(float(c.get("similarity_score") or 0) > 0 for c in pub)
+    assert all(c.get("chunk_id") != 3 for c in pub)
+
+    assert svc.citations_for_kind("refusal", raw) == []
+    assert svc.citations_for_kind("advice", raw) == []
+    assert svc.citations_for_kind("degraded", raw) == []
+    ans = svc.citations_for_kind("answer", raw)
+    assert len(ans) >= 1
+    assert all(float(c.get("similarity_score") or 0) > 0 for c in ans)
+
+
+def test_advice_and_offtopic_helpers():
+    from app.services.query_service import QueryService
+
+    svc = QueryService()
+    assert svc._is_advice_or_guarantee_question("这份保单保证我一定能获赔吗？")
+    assert svc._is_off_topic("今天北京天气怎么样？", [])

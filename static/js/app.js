@@ -40,7 +40,21 @@
 
   let pdfs = [];
   let activeSources = [];
-  let lastStickyView = null; // P3: keep last citation across follow-ups
+  let lastStickyView = null;
+  const sessionId = (function () {
+    try {
+      const k = "insur_session_id";
+      let v = localStorage.getItem(k);
+      if (!v) {
+        v = "s_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        localStorage.setItem(k, v);
+      }
+      return v;
+    } catch (e) {
+      return "s_" + String(Date.now());
+    }
+  })();
+ // P3: keep last citation across follow-ups
   let currentView = { name: null, url: null, page: null, index: null, excerpt: "" };
   let isLoading = false;
   let abortController = null;
@@ -320,6 +334,9 @@
           banner.className = "pdf-highlight-fallback";
           banner.textContent = "摘录定位：本页 · 未精确匹配文本层（仍显示页码证据）";
           pdfHighlightLayer.appendChild(banner);
+          if (typeof showToast === "function") {
+            showToast("无法高亮摘录，已打开原页");
+          }
         }
       }
 
@@ -329,6 +346,9 @@
       return true;
     } catch (err) {
       console.warn("PDF.js render failed, falling back to iframe", err);
+      if (typeof showToast === "function") {
+        showToast("无法高亮摘录，已打开原页");
+      }
       return false;
     }
   }
@@ -464,10 +484,13 @@
     );
   }
 
-  function setLoading(v) {
+  function setLoading(v, stage) {
     isLoading = v;
     sendBtn.disabled = v || !String(input.value || "").trim();
-    if (genPill) genPill.hidden = !v;
+    if (genPill) {
+      genPill.hidden = !v;
+      if (v) setStatus(stage || "generate");
+    }
     if (stopBtn) stopBtn.hidden = !v;
     const lastIcon = messagesEl.querySelector(
       ".message.is-assistant:last-child .message-icon"
@@ -485,6 +508,42 @@
     errPill.hidden = false;
     errPill.textContent = "错误：" + msg;
   }
+
+  function showToast(msg, ms) {
+    ms = ms || 3200;
+    let el = document.getElementById("uiToast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "uiToast";
+      el.className = "ui-toast";
+      el.hidden = true;
+      document.body.appendChild(el);
+    }
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      return;
+    }
+    el.textContent = msg;
+    el.hidden = false;
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(function () {
+      el.hidden = true;
+    }, ms);
+  }
+
+  function setStatus(stage) {
+    if (!genPill) return;
+    const map = {
+      retrieve: "检索中",
+      generate: "生成中",
+      done: "完成",
+      idle: "生成中",
+    };
+    const texts = genPill.querySelectorAll("span");
+    if (texts && texts.length) texts[0].textContent = map[stage] || "生成中";
+  }
+
 
   async function loadCorpus() {
     try {
@@ -634,7 +693,14 @@
 
   function citationsHtml(sources, groupId) {
     if (!sources || !sources.length) return "";
-    const cards = sources
+    const visible = sources.filter(function (s) {
+      if (s == null) return false;
+      if (s.similarity_score == null || s.similarity_score === "") return true;
+      const n = Number(s.similarity_score);
+      return !(Number.isFinite(n) && n <= 0);
+    });
+    if (!visible.length) return "";
+    const cards = visible
       .map(function (s, i) {
         const name = displayNameFor(
           s.document_name || s.source || s.filename || "doc",
@@ -642,10 +708,11 @@
         );
         const page = s.page_number ?? s.page ?? "—";
         const excerpt = cleanExcerpt(s.content || s.excerpt || s.text || "");
-        const score =
-          s.similarity_score != null
-            ? Number(s.similarity_score).toFixed(3)
-            : "";
+        let score = "";
+        if (s.similarity_score != null && s.similarity_score !== "") {
+          const n = Number(s.similarity_score);
+          if (Number.isFinite(n) && n > 0) score = n.toFixed(3);
+        }
         return (
           '<button type="button" class="cite-card" data-cite-index="' +
           (i + 1) +
@@ -676,7 +743,7 @@
       '<div class="citations" data-cite-group="' +
       groupId +
       '"><div class="citations-title">来源 · ' +
-      sources.length +
+      visible.length +
       " · 点击打开左侧原文</div>" +
       cards +
       "</div>"
@@ -795,7 +862,12 @@
         index +
         '"]'
     );
-    if (card) card.classList.add("is-active");
+    if (card) {
+      card.classList.add("is-active");
+      try {
+        card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch (e) {}
+    }
   }
 
   function activateCitation(index, sources, groupId) {
@@ -843,6 +915,7 @@
         question: question,
         stream: false,
         show_sources: true,
+        session_id: sessionId,
       }),
       signal: abortController ? abortController.signal : undefined,
     });
@@ -863,6 +936,7 @@
         question: question,
         stream: true,
         show_sources: true,
+        session_id: sessionId,
       }),
       signal: abortController ? abortController.signal : undefined,
     });
@@ -931,17 +1005,19 @@
     const q = String(question || "").trim();
     if (!q || isLoading) return;
     showError("");
-    setLoading(true);
+    setLoading(true, "retrieve");
     abortController = new AbortController();
     ensureMessagesVisible();
     appendMessage("user", escapeHtml(q));
     const assistantRow = appendMessage("assistant", "…", "is-pending");
+    setStatus("generate");
 
     try {
       if (streamToggle && streamToggle.checked) {
         await askStream(
           q,
           function (partial) {
+            setStatus("generate");
             const body = assistantRow.querySelector(".message-body");
             // P1: mid-stream tokens only — no citations, no PDF open
             if (body) body.innerHTML = formatAnswerHtml(partial);

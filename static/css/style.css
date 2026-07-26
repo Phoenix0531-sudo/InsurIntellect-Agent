@@ -1093,3 +1093,26 @@ a {
   border-color: color-mix(in srgb, hsl(var(--primary)) 35%, hsl(var(--border)));
   color: hsl(var(--primary));
 }
+
+
+/* Transient UI toast (PDF highlight / soft notices) */
+.ui-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(420px, 90vw);
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(29, 156, 255, 0.35);
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+.ui-toast[hidden] {
+  display: none !important;
+}

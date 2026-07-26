@@ -199,6 +199,58 @@ class QueryService:
         return selected
 
 
+
+    def public_citations(
+        self,
+        chunks: List[Dict[str, Any]],
+        *,
+        for_ui: bool = True,
+        min_score: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """Keep only chunks with a real similarity for UI/API honesty.
+
+        Padding / zero-score fillers are dropped so refusal and weak hits
+        do not look like fake evidence.
+        """
+        out: List[Dict[str, Any]] = []
+        for c in chunks or []:
+            if not isinstance(c, dict):
+                continue
+            try:
+                score = float(self._chunk_gate_score(c))
+            except Exception:
+                try:
+                    score = float(c.get("similarity_score") or 0.0)
+                except Exception:
+                    score = 0.0
+            if score <= float(min_score or 0.0):
+                continue
+            if self._is_weak_citation_chunk(c):
+                continue
+            cc = dict(c)
+            # store normalized score for display honesty
+            cc["similarity_score"] = round(max(0.0, min(1.0, score)), 4)
+            out.append(cc)
+        return out
+
+    def citations_for_kind(
+        self,
+        kind: str,
+        chunks: List[Dict[str, Any]],
+        *,
+        min_score: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Policy: refusal/advice/degraded -> no public sources; answer keeps scored ones."""
+        k = (kind or "answer").lower()
+        if k in ("refusal", "advice", "degraded", "insufficient_evidence"):
+            return []
+        thr = min_score
+        # for answer / llm_unavailable keep real cosine-like scores;
+        # drop pure RRF filler ranks (~0.03) that look like fake evidence.
+        if thr is None or float(thr) <= 0.0:
+            thr = 0.05
+        return self.public_citations(chunks, min_score=float(thr))
+
     def _to_retrieved_chunks(self, chunks: List[Dict[str, Any]]) -> List[RetrievedChunk]:
         """Normalize raw retrieval dicts into RetrievedChunk models."""
         normalized: List[RetrievedChunk] = []
@@ -260,24 +312,36 @@ class QueryService:
             else:
                 page_val = None
 
+            # Prefer already-normalized public score on the chunk first so
+            # public_citations filtering is not undone by metadata fallbacks.
             rd = md.get("ranking_details") if isinstance(md.get("ranking_details"), dict) else {}
-            sim_raw = (
-                md.get("vector_score")
-                if md.get("vector_score") is not None
-                else c.get("vector_score")
-                if c.get("vector_score") is not None
-                else rd.get("original_similarity")
-                if rd
-                else c.get("similarity_score")
-            )
-            try:
-                sim_val = float(sim_raw) if sim_raw is not None else 0.0
-            except Exception:
+            candidates = [
+                c.get("similarity_score"),
+                md.get("vector_score"),
+                c.get("vector_score"),
+                rd.get("original_similarity") if rd else None,
+            ]
+            sim_val = 0.0
+            for sim_raw in candidates:
+                if sim_raw is None:
+                    continue
+                try:
+                    v = float(sim_raw)
+                except Exception:
+                    continue
+                if v < 0.0:
+                    v = 0.0
+                if v > 1.0:
+                    # distance-like or oversized — normalize lightly
+                    if v <= 2.0:
+                        v = max(0.0, min(1.0, 1.0 - v)) if v > 1.0 else v
+                    else:
+                        v = max(0.0, min(1.0, 1.0 / (1.0 + v)))
+                if v > 0.0:
+                    sim_val = v
+                    break
+            else:
                 sim_val = 0.0
-            if sim_val < 0.0:
-                sim_val = 0.0
-            if sim_val > 1.0:
-                sim_val = 1.0
 
             metadata_val = dict(md) if isinstance(md, dict) else {}
             if c.get("display_name") and "display_name" not in metadata_val:
@@ -489,13 +553,14 @@ class QueryService:
                     except Exception:
                         retrieved_chunks = []
                     response_time = (datetime.utcnow() - start_time).total_seconds()
+                    # advice: never attach sources (UI sticky / empty pane)
                     return QueryResponse(
                         question=request.question,
                         answer=self._refusal_answer("advice"),
                         query_type=request.query_type,
                         response_time=response_time,
-                        chunks_used=len(retrieved_chunks),
-                        retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
+                        chunks_used=0,
+                        retrieved_chunks=[],
                         confidence_score=0.0,
                         query_id=None,
                         answer_kind="advice",
@@ -670,13 +735,14 @@ class QueryService:
                 off_topic = self._is_off_topic(request.question, retrieved_chunks)
                 if off_topic or (not retrieved_chunks) or best_sim < float(getattr(settings, "SIMILARITY_THRESHOLD", 0.2)):
                     response_time = (datetime.utcnow() - start_time).total_seconds()
+                    # Public API: no low-score filler citations on refusal
                     response = QueryResponse(
                         question=request.question,
                         answer=self._refusal_answer("insufficient_evidence"),
                         query_type=request.query_type,
                         response_time=response_time,
-                        chunks_used=len(retrieved_chunks),
-                        retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
+                        chunks_used=0,
+                        retrieved_chunks=[],
                         confidence_score=round(best_sim, 4),
                         query_id=None,
                         answer_kind="refusal",
@@ -689,14 +755,20 @@ class QueryService:
                                 answer=response.answer,
                                 query_type=request.query_type,
                                 response_time=response_time,
-                                chunks_used=len(retrieved_chunks),
+                                chunks_used=0,
                                 session_id=getattr(request, "session_id", None),
                                 rewritten_query=rewritten_query,
                                 rewriting_metadata_json=json.dumps(
-                                    {"route": "RAG", "refused": True, "best_similarity": best_sim},
+                                    {
+                                        "route": "RAG",
+                                        "refused": True,
+                                        "best_similarity": best_sim,
+                                        "debug_chunk_count": len(retrieved_chunks or []),
+                                    },
                                     ensure_ascii=False,
                                 ),
-                                retrieved_chunks_json=json.dumps(retrieved_chunks, ensure_ascii=False) if retrieved_chunks else None,
+                                # keep debug-only payload off public response; optional history
+                                retrieved_chunks_json=None,
                             )
                         )
                     except Exception:
@@ -725,7 +797,7 @@ class QueryService:
                         query_type=request.query_type,
                         response_time=response_time,
                         chunks_used=len(retrieved_chunks),
-                        retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks),
+                        retrieved_chunks=self._to_retrieved_chunks(self.public_citations(retrieved_chunks)),
                         confidence_score=round(best_sim, 4),
                         query_id=None,
                         answer_kind="llm_unavailable",
@@ -755,16 +827,17 @@ class QueryService:
                             + "\n\n【不确定/边界】\n本系统不构成保险销售或理赔承诺。"
                         )
                         response_time = (datetime.utcnow() - start_time).total_seconds()
+                        ui_chunks = self.citations_for_kind("llm_unavailable", retrieved_chunks)
                         return QueryResponse(
                             question=request.question,
                             answer=answer_text,
                             query_type=request.query_type,
                             response_time=response_time,
-                            chunks_used=len(retrieved_chunks),
-                            retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks),
+                            chunks_used=len(ui_chunks),
+                            retrieved_chunks=self._to_retrieved_chunks(ui_chunks),
                             confidence_score=round(best_sim, 4),
                             query_id=None,
-                            answer_kind="answer",
+                            answer_kind="llm_unavailable",
                             embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                         )
                 except asyncio.TimeoutError:
@@ -777,11 +850,11 @@ class QueryService:
                         answer=answer_text,
                         query_type=request.query_type,
                         response_time=response_time,
-                        chunks_used=len(retrieved_chunks),
-                        retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
+                        chunks_used=0,
+                        retrieved_chunks=[],
                         confidence_score=0.0,
                         query_id=None,
-                        answer_kind="answer",
+                        answer_kind="degraded",
                         embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                     )
                     # 后台保存，不阻塞
@@ -812,11 +885,11 @@ class QueryService:
                         answer=answer_text,
                         query_type=request.query_type,
                         response_time=response_time,
-                        chunks_used=len(retrieved_chunks),
-                        retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
+                        chunks_used=0,
+                        retrieved_chunks=[],
                         confidence_score=0.0,
                         query_id=None,
-                        answer_kind="answer",
+                        answer_kind="degraded",
                         embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                     )
                     # 后台保存，不阻塞
@@ -842,13 +915,14 @@ class QueryService:
                 answer_text = gen_res.get("answer", "")
                 response_time = (datetime.utcnow() - start_time).total_seconds()
 
+                ui_chunks = self.citations_for_kind("answer", retrieved_chunks)
                 response = QueryResponse(
                     question=request.question,
                     answer=answer_text,
                     query_type=request.query_type,
                     response_time=response_time,
-                    chunks_used=len(retrieved_chunks),
-                    retrieved_chunks=self._to_retrieved_chunks(retrieved_chunks) if retrieved_chunks else [],
+                    chunks_used=len(ui_chunks),
+                    retrieved_chunks=self._to_retrieved_chunks(ui_chunks) if ui_chunks else [],
                     confidence_score=0.9,
                     query_id=None,
                     answer_kind="answer",
@@ -934,6 +1008,24 @@ class QueryService:
                 }
                 yield f"event: start\n"
                 yield f"data: {_json.dumps(start_evt, ensure_ascii=False)}\n\n"
+
+                # Early advice gate: no sources on purchase/guarantee questions
+                if self._is_advice_or_guarantee_question(request.question):
+                    advice_ans = self._refusal_answer("advice")
+                    end_evt = {
+                        "type": "end",
+                        "answer": advice_ans,
+                        "response_time": (datetime.utcnow() - start_time).total_seconds(),
+                        "query_id": None,
+                        "success": True,
+                        "retrieved_chunks": [],
+                        "chunks_used": 0,
+                        "answer_kind": "advice",
+                        "embedding_provider": getattr(getattr(self, "embedding_service", None), "provider", None),
+                    }
+                    yield f"event: end\n"
+                    yield f"data: {_json.dumps(end_evt, ensure_ascii=False)}\n\n"
+                    return
 
                 # 在构建上下文前调用路由器（R4.2 - 流式路径），受开关控制
                 route_result = {"route": "RAG"}
@@ -1047,6 +1139,28 @@ class QueryService:
                 except Exception as kg_err:
                     logger.debug(f"KG事实注入失败(流式)：{kg_err}")
 
+                # Refusal gate for SSE path (public chunks empty)
+                best_sim = self._best_similarity(retrieved_chunks)
+                off_topic = self._is_off_topic(request.question, retrieved_chunks)
+                thr = float(getattr(settings, "SIMILARITY_THRESHOLD", 0.2))
+                if off_topic or (not retrieved_chunks) or best_sim < thr:
+                    refuse_ans = self._refusal_answer("insufficient_evidence")
+                    end_evt = {
+                        "type": "end",
+                        "answer": refuse_ans,
+                        "response_time": (datetime.utcnow() - start_time).total_seconds(),
+                        "query_id": None,
+                        "success": True,
+                        "retrieved_chunks": [],
+                        "chunks_used": 0,
+                        "answer_kind": "refusal",
+                        "confidence_score": round(best_sim, 4),
+                        "embedding_provider": getattr(getattr(self, "embedding_service", None), "provider", None),
+                    }
+                    yield f"event: end\n"
+                    yield f"data: {_json.dumps(end_evt, ensure_ascii=False)}\n\n"
+                    return
+
                 context_evt = {
                     "type": "context",
                     "rewritten_query": rewritten_query,
@@ -1125,21 +1239,35 @@ class QueryService:
                     logger.warning(f"流式查询历史保存失败: {save_error}")
                     query_id = None
 
+                _ans = final_text.strip() if final_text else ""
+                _kind = "answer"
+                _q = request.question or ""
+                if "未在已入库条款中找到充分依据" in _ans:
+                    _kind = "refusal"
+                elif self._is_advice_or_guarantee_question(_q):
+                    _kind = "advice"
+                elif "LLM 不可用" in _ans:
+                    _kind = "llm_unavailable"
+                elif "系统当前繁忙" in _ans or "出现了错误" in _ans:
+                    _kind = "degraded"
+                ui_chunks = self.citations_for_kind(_kind, retrieved_chunks)
                 try:
                     chunk_payload = [
                         rc.model_dump() if hasattr(rc, "model_dump") else dict(rc)
-                        for rc in self._to_retrieved_chunks(retrieved_chunks)
+                        for rc in self._to_retrieved_chunks(ui_chunks)
                     ]
                 except Exception:
-                    chunk_payload = retrieved_chunks
+                    chunk_payload = ui_chunks
                 end_evt = {
                     "type": "end",
-                    "answer": final_text.strip() if final_text else "",
+                    "answer": _ans,
                     "response_time": (datetime.utcnow() - start_time).total_seconds(),
                     "query_id": query_id,
                     "success": True,
                     "retrieved_chunks": chunk_payload,
                     "chunks_used": len(chunk_payload),
+                    "answer_kind": _kind,
+                    "embedding_provider": getattr(getattr(self, "embedding_service", None), "provider", None),
                 }
                 yield f"event: end\n"
                 yield f"data: {_json.dumps(end_evt, ensure_ascii=False)}\n\n"
@@ -1196,6 +1324,20 @@ class QueryService:
                     "timestamp": start_time.timestamp(),
                 }
 
+                if self._is_advice_or_guarantee_question(request.question):
+                    yield {
+                        "type": "end",
+                        "answer": self._refusal_answer("advice"),
+                        "response_time": (datetime.utcnow() - start_time).total_seconds(),
+                        "query_id": None,
+                        "success": True,
+                        "retrieved_chunks": [],
+                        "chunks_used": 0,
+                        "answer_kind": "advice",
+                        "embedding_provider": getattr(getattr(self, "embedding_service", None), "provider", None),
+                    }
+                    return
+
                 # 构建上下文（RAG前四步）
                 ctx = agent.build_context(question_for_retrieval)
                 retrieved_chunks = ctx.get("retrieved_chunks", []) or []
@@ -1210,10 +1352,30 @@ class QueryService:
                     or (question_for_retrieval if question_for_retrieval != request.question else None)
                 )
 
+                # Public context: drop zero-score fillers; refuse if weak/off-topic
+                best_sim = self._best_similarity(retrieved_chunks)
+                off_topic = self._is_off_topic(request.question, retrieved_chunks)
+                thr = float(getattr(settings, "SIMILARITY_THRESHOLD", 0.2))
+                if off_topic or (not retrieved_chunks) or best_sim < thr:
+                    yield {
+                        "type": "end",
+                        "answer": self._refusal_answer("insufficient_evidence"),
+                        "response_time": (datetime.utcnow() - start_time).total_seconds(),
+                        "query_id": None,
+                        "success": True,
+                        "retrieved_chunks": [],
+                        "chunks_used": 0,
+                        "answer_kind": "refusal",
+                        "confidence_score": round(best_sim, 4),
+                        "embedding_provider": getattr(getattr(self, "embedding_service", None), "provider", None),
+                    }
+                    return
+
+                pub_ctx = self.public_citations(retrieved_chunks)
                 yield {
                     "type": "context",
                     "rewritten_query": rewritten_query,
-                    "retrieved_chunks": retrieved_chunks,
+                    "retrieved_chunks": pub_ctx,
                     "route": "RAG",
                 }
 
@@ -1303,25 +1465,26 @@ class QueryService:
                     logger.warning(f"流式查询历史保存失败: {save_error}")
                     query_id = None
 
-                try:
-                    chunk_payload = [
-                        rc.model_dump() if hasattr(rc, "model_dump") else dict(rc)
-                        for rc in self._to_retrieved_chunks(retrieved_chunks)
-                    ]
-                except Exception:
-                    chunk_payload = retrieved_chunks
                 # Classify stream end for UI state cards
                 _ans = final_text.strip() if final_text else ""
                 _kind = "answer"
                 _q = request.question or ""
                 if "未在已入库条款中找到充分依据" in _ans:
                     _kind = "refusal"
-                elif any(k in _q for k in ("一定能获赔", "该不该买", "要不要买", "保证获赔")):
+                elif self._is_advice_or_guarantee_question(_q):
                     _kind = "advice"
                 elif "LLM 不可用" in _ans:
                     _kind = "llm_unavailable"
                 elif "系统当前繁忙" in _ans or "出现了错误" in _ans:
                     _kind = "degraded"
+                ui_chunks = self.citations_for_kind(_kind, retrieved_chunks)
+                try:
+                    chunk_payload = [
+                        rc.model_dump() if hasattr(rc, "model_dump") else dict(rc)
+                        for rc in self._to_retrieved_chunks(ui_chunks)
+                    ]
+                except Exception:
+                    chunk_payload = ui_chunks
                 yield {
                     "type": "end",
                     "answer": _ans,
