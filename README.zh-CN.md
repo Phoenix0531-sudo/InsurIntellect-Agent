@@ -33,6 +33,16 @@
 
 ![Visitors](https://api.visitorbadge.io/api/VisitorHit?user=Phoenix0531-sudo&repo=InsurIntellect-Agent&countColor=%231D9CFF)
 
+<p align="center">
+  <img src="docs/screenshots/preview.png" alt="主界面双栏" width="48%" />
+  <img src="docs/screenshots/citations.png" alt="引用卡" width="48%" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/refuse_advice.png" alt="拒答 / 建议边界" width="48%" />
+  <img src="docs/screenshots/preview_empty.png" alt="冷启动 / 空态" width="48%" />
+</p>
+<p align="center"><sub>主界面 · 引用 · 拒答/建议 · 空态 — 大图见 <code>docs/screenshots/</code></sub></p>
+
 InsurIntellect 是面向作品集的 **金融垂直智能体演示**：对保险条款 / 保单类 PDF 做本地问答。
 
 - 索引本地条款语料

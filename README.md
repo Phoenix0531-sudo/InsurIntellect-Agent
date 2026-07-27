@@ -33,6 +33,16 @@
 
 ![Visitors](https://api.visitorbadge.io/api/VisitorHit?user=Phoenix0531-sudo&repo=InsurIntellect-Agent&countColor=%231D9CFF)
 
+<p align="center">
+  <img src="docs/screenshots/preview.png" alt="Main dual-pane UI" width="48%" />
+  <img src="docs/screenshots/citations.png" alt="Citation cards" width="48%" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/refuse_advice.png" alt="Refuse / advice boundary" width="48%" />
+  <img src="docs/screenshots/preview_empty.png" alt="Empty / cold start" width="48%" />
+</p>
+<p align="center"><sub>Main UI · Citations · Refuse / advice · Empty state — full-size assets under <code>docs/screenshots/</code></sub></p>
+
 InsurIntellect is a **portfolio-ready financial agent demo** for insurance policy / clause PDFs:
 
 - Index a local clause corpus
