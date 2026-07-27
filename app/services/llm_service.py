@@ -19,15 +19,20 @@ class LLMService:
     def __init__(self, *, model_name: Optional[str] = None, max_tokens: Optional[int] = None, temperature: Optional[float] = None):
         # 初始化 OpenAI 客户端，配置超时（重试由本类统一管理）
         # 兼容硅基流动：允许从 OPENAI_API_KEY/SILICONFLOW_API_KEY 与 OPENAI_BASE_URL/SILICONFLOW_BASE_URL 回退
-        api_key = settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY
-        base_url = settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL
-
-        self.client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            timeout=float(settings.OPENAI_TIMEOUT_SECS),
-            max_retries=0,
-        )
+        api_key = (settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY or "").strip()
+        base_url = (settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL or "").strip() or None
+        self._api_key = api_key
+        self._base_url = base_url
+        # Allow construction without credentials; generate paths must check first.
+        # OpenAI SDK rejects empty api_key, so defer client creation until key exists.
+        self.client = None
+        if api_key:
+            self.client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                timeout=float(settings.OPENAI_TIMEOUT_SECS),
+                max_retries=0,
+            )
 
         # 允许构造时覆盖模型与采样参数（用于轻量/核心分工）
         self.model = (model_name or settings.OPENAI_MODEL)
@@ -53,6 +58,9 @@ class LLMService:
             LLMService._failure_count = 0
         if not hasattr(LLMService, "_circuit_opened_at"):
             LLMService._circuit_opened_at = None
+
+    def has_credentials(self) -> bool:
+        return bool((getattr(self, "_api_key", None) or "").strip()) and self.client is not None
 
     @classmethod
     def with_model(cls, model_name: str, *, max_tokens: Optional[int] = None, temperature: Optional[float] = None) -> "LLMService":
@@ -593,18 +601,9 @@ class LLMService:
             }
 
     async def health_check(self) -> bool:
-        """健康检查"""
-        try:
-            await self._chat_completion(
-                messages=[{"role": "user", "content": "Hello"}],
-                max_tokens=10,
-                temperature=0,
-            )
-            return True
+        """Credentials present (demo does not ping provider on every health)."""
+        return self.has_credentials()
 
-        except Exception as e:
-            logger.error(f"LLM 服务健康检查失败: {e}")
-            return False
 
     async def rewrite_query(
         self,

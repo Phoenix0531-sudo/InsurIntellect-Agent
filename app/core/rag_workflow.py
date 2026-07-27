@@ -110,14 +110,20 @@ class InsurIntellectAgent:
                 or settings.SILICONFLOW_MODEL
                 or "gpt-5.4"
             )
-            self.llm = ChatOpenAI(
-                model=_model,
-                temperature=settings.OPENAI_TEMPERATURE,
-                max_tokens=settings.OPENAI_MAX_TOKENS,
-                api_key=settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY,
-                base_url=settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL,
-            )
-            logger.info("ChatOpenAI LLM初始化成功")
+            _api_key = (settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY or "").strip()
+            _base_url = (settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL or "").strip() or None
+            self.llm = None
+            if _api_key:
+                self.llm = ChatOpenAI(
+                    model=_model,
+                    temperature=settings.OPENAI_TEMPERATURE,
+                    max_tokens=settings.OPENAI_MAX_TOKENS,
+                    api_key=_api_key,
+                    base_url=_base_url,
+                )
+                logger.info("ChatOpenAI LLM初始化成功")
+            else:
+                logger.warning("未配置 API Key：跳过 ChatOpenAI 初始化（检索仍可用，生成走 llm_unavailable）")
             
             # 初始化嵌入服务（双模式）
             self.embedding_service = EmbeddingService(model_name=settings.OPENAI_EMBEDDING_MODEL)

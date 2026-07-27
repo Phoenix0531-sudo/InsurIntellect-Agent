@@ -25,8 +25,10 @@ def _derive_async_url(sync_url: str) -> str:
     return sync_url  # 非SQLite需通过 settings.DATABASE_URL_ASYNC 显式提供
 
 
-# 选择异步数据库URL
-ASYNC_DB_URL = settings.DATABASE_URL_ASYNC or _derive_async_url(settings.DATABASE_URL)
+# 选择异步数据库URL（空白视为未配置，回退到 SQLite 异步推导）
+_async_override = (settings.DATABASE_URL_ASYNC or "").strip()
+ASYNC_DB_URL = _async_override or _derive_async_url((settings.DATABASE_URL or "").strip())
+
 
 # 异步数据库引擎配置
 if ASYNC_DB_URL.startswith("sqlite+aiosqlite"):

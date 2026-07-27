@@ -165,6 +165,8 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Windows .env often uses CRLF; strip CR so empty/async URLs stay valid.
+        self._sanitize_string_fields()
         self._create_directories()
         try:
             if (self.OPENAI_MODEL_CORE or "").strip() == "":
@@ -173,6 +175,13 @@ class Settings(BaseSettings):
                 self.OPENAI_MODEL_LIGHT = self.OPENAI_MODEL
         except Exception:
             pass
+
+    def _sanitize_string_fields(self) -> None:
+        for name, value in list(self.__dict__.items()):
+            if isinstance(value, str):
+                cleaned = value.replace(chr(13), "").strip()
+                if cleaned != value:
+                    object.__setattr__(self, name, cleaned)
 
     def _create_directories(self):
         """创建必要的目录"""

@@ -4,9 +4,11 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-<!-- 状态：私有仓下 GitHub 动态 shields 会显示 repo not found；公开后再切回动态徽章。 -->
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
+<!-- 动态 GitHub 徽章（仓库已公开） -->
+[![CI](https://img.shields.io/github/actions/workflow/status/Phoenix0531-sudo/InsurIntellect-Agent/ci.yml?branch=master&label=CI)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/Phoenix0531-sudo/InsurIntellect-Agent?style=flat)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/Phoenix0531-sudo/InsurIntellect-Agent/master)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/commits/master)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](#快速开始)
 
@@ -24,6 +26,17 @@
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
 <p align="center">
+  <img src="docs/screenshots/logo.png" alt="InsurIntellect 标识" width="72" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="InsurIntellect 主视觉 — 双栏条款 RAG" width="92%" />
+</p>
+<p align="center"><sub>主视觉来自真实双栏会话（右栏引用、左栏条款 PDF / 证据条）。</sub></p>
+
+<details>
+<summary><strong>四态界面</strong>（主界面 · 引用 · 拒答/建议 · 空态）</summary>
+<p align="center">
   <img src="docs/screenshots/preview.png" alt="主界面双栏" width="48%" />
   <img src="docs/screenshots/citations.png" alt="引用卡" width="48%" />
 </p>
@@ -31,7 +44,7 @@
   <img src="docs/screenshots/refuse_advice.png" alt="拒答 / 建议边界" width="48%" />
   <img src="docs/screenshots/preview_empty.png" alt="冷启动 / 空态" width="48%" />
 </p>
-<p align="center"><sub>主界面 · 引用 · 拒答/建议 · 空态 — 大图见 <code>docs/screenshots/</code></sub></p>
+</details>
 
 InsurIntellect 是面向作品集的 **金融垂直智能体演示**：对保险条款 / 保单类 PDF 做本地问答。
 

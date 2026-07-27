@@ -4,11 +4,11 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-<!-- Status: static badges work while repo is private.
-     Dynamic github.com / shields.io GitHub metrics show "repo not found" on private repos.
-     Switch CI/License/stars rows to dynamic shields after the repo is public. -->
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
+<!-- Dynamic GitHub badges (repo public). -->
+[![CI](https://img.shields.io/github/actions/workflow/status/Phoenix0531-sudo/InsurIntellect-Agent/ci.yml?branch=master&label=CI)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/Phoenix0531-sudo/InsurIntellect-Agent?style=flat)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/Phoenix0531-sudo/InsurIntellect-Agent/master)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/commits/master)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](#quickstart)
 
@@ -26,6 +26,17 @@
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
 <p align="center">
+  <img src="docs/screenshots/logo.png" alt="InsurIntellect mark" width="72" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="InsurIntellect hero — dual-pane clause RAG" width="92%" />
+</p>
+<p align="center"><sub>Hero from a live dual-pane session (citations on the right, clause PDF / evidence on the left).</sub></p>
+
+<details>
+<summary><strong>Four UI states</strong> (main · citations · refuse/advice · empty)</summary>
+<p align="center">
   <img src="docs/screenshots/preview.png" alt="Main dual-pane UI" width="48%" />
   <img src="docs/screenshots/citations.png" alt="Citation cards" width="48%" />
 </p>
@@ -33,7 +44,7 @@
   <img src="docs/screenshots/refuse_advice.png" alt="Refuse / advice boundary" width="48%" />
   <img src="docs/screenshots/preview_empty.png" alt="Empty / cold start" width="48%" />
 </p>
-<p align="center"><sub>Main UI · Citations · Refuse / advice · Empty state — full-size assets under <code>docs/screenshots/</code></sub></p>
+</details>
 
 InsurIntellect is a **portfolio-ready financial agent demo** for insurance policy / clause PDFs:
 
@@ -105,6 +116,8 @@ When evidence is weak, missing, or the user asks for regulated advice, the syste
 
 | View | File |
 |------|------|
+| Hero banner | [docs/screenshots/hero.png](docs/screenshots/hero.png) |
+| Logo mark | [docs/screenshots/logo.png](docs/screenshots/logo.png) |
 | Main two-pane UI | [docs/screenshots/preview.png](docs/screenshots/preview.png) |
 | Citation cards | [docs/screenshots/citations.png](docs/screenshots/citations.png) |
 | Refuse / advice boundary | [docs/screenshots/refuse_advice.png](docs/screenshots/refuse_advice.png) |
