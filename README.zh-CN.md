@@ -258,6 +258,12 @@ OpenAPI（`DEBUG=true` 时）：**http://127.0.0.1:8766/docs**
 
 覆盖 Q1 / Q2 / Q3 / 离题天气，并检查 `answer_kind` 与引用诚实性。
 
+可选空索引诚实矩阵（Windows 合法临时目录，不碰正式语料）：
+
+```bash
+.venv\Scripts\python.exe scripts\empty_index_smoke.py
+```
+
 ---
 
 ## 固定演示问题
@@ -308,12 +314,15 @@ InsurIntellect-Agent
 │   │   └── llm_service.py
 │   └── prompts.py
 ├── static/                     # 双栏 UI（主 JS：js/app.js）
-├── scripts/
+├── scripts/                    # 仅主路径
 │   ├── generate_sample_corpus.py
 │   ├── simple_ingest.py
 │   ├── run_demo.sh / run_demo.bat
-│   └── demo_smoke.py
+│   ├── demo_smoke.py
+│   ├── capture_ui_states.py
+│   └── empty_index_smoke.py    # 可选：空索引诚实矩阵
 ├── samples/                    # 公开假 PDF 源
+├── tools/insurance_ontology.json  # 可选 advanced 重写数据
 ├── tests/                      # CI 不依赖真实 LLM Key
 ├── docs/screenshots/
 ├── .env.example

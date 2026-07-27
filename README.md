@@ -189,7 +189,7 @@ Off by default (advanced / optional code only): query rewriting, SQL routing, kn
 | LLM | OpenAI-compatible (`OPENAI_BASE_URL`) |
 | UI | Static HTML / CSS / JS (`static/js/app.js`) |
 | Tests | pytest + ruff critical rules (CI) |
-| Demo | `scripts/run_demo.sh` / `.bat` + `demo_smoke.py` |
+| Demo | `scripts/run_demo.sh` / `.bat` + `demo_smoke.py` (+ optional `empty_index_smoke.py`) |
 
 ---
 
@@ -260,6 +260,12 @@ If the LLM key is missing, the API still returns an honest **LLM unavailable** p
 
 Covers Q1 / Q2 / Q3 / off-topic weather and asserts `answer_kind` + citation honesty.
 
+Optional empty-index honesty matrix (isolated Windows temp dirs, no live corpus):
+
+```bash
+.venv/Scripts/python.exe scripts/empty_index_smoke.py
+```
+
 ---
 
 ## Demo questions
@@ -310,12 +316,15 @@ InsurIntellect-Agent
 │   │   └── llm_service.py
 │   └── prompts.py
 ├── static/                     # dual-pane UI (single JS path: js/app.js)
-├── scripts/
+├── scripts/                    # main path only
 │   ├── generate_sample_corpus.py
 │   ├── simple_ingest.py
 │   ├── run_demo.sh / run_demo.bat
-│   └── demo_smoke.py
+│   ├── demo_smoke.py
+│   ├── capture_ui_states.py
+│   └── empty_index_smoke.py    # optional honesty matrix (empty chroma)
 ├── samples/                    # public fake PDFs (source)
+├── tools/insurance_ontology.json  # optional advanced rewrite data
 ├── tests/                      # CI without live LLM keys
 ├── docs/screenshots/
 ├── .env.example
