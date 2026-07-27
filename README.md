@@ -4,34 +4,26 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-<!-- Status -->
-[![CI](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent?color=brightgreen)](LICENSE)
+<!-- Status: static badges work while repo is private.
+     Dynamic github.com / shields.io GitHub metrics show "repo not found" on private repos.
+     Switch CI/License/stars rows to dynamic shields after the repo is public. -->
+[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Last commit](https://img.shields.io/github/last-commit/Phoenix0531-sudo/InsurIntellect-Agent)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/commits/master)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](#quickstart)
 
-<!-- Repo stats (FinRobot-style density) -->
-[![Stars](https://img.shields.io/github/stars/Phoenix0531-sudo/InsurIntellect-Agent?style=flat)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/stargazers)
-[![Forks](https://img.shields.io/github/forks/Phoenix0531-sudo/InsurIntellect-Agent?style=flat)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/network/members)
-[![Issues](https://img.shields.io/github/issues-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Issues)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/issues)
-[![Closed Issues](https://img.shields.io/github/issues-closed-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Closed%20Issues)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/issues?q=is%3Aissue+is%3Aclosed)
-[![Open PRs](https://img.shields.io/github/issues-pr-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Open%20PRs)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/pulls)
-[![Closed PRs](https://img.shields.io/github/issues-pr-closed-raw/Phoenix0531-sudo/InsurIntellect-Agent?label=Closed%20PRs)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/pulls?q=is%3Apr+is%3Aclosed)
-[![Code size](https://img.shields.io/github/languages/code-size/Phoenix0531-sudo/InsurIntellect-Agent)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent)
-[![Top language](https://img.shields.io/github/languages/top/Phoenix0531-sudo/InsurIntellect-Agent)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent)
-
-<!-- Product / stack (honest static badges — no fake PyPI / Discord) -->
+<!-- Product / stack (honest static — no fake PyPI / Discord / Downloads) -->
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 [![Chroma](https://img.shields.io/badge/vector-Chroma-FF6F61.svg)](https://www.trychroma.com/)
 [![BM25](https://img.shields.io/badge/lexical-BM25%2Bjieba-6C63FF.svg)](#architecture)
 [![Embedding](https://img.shields.io/badge/embed-BGE%20small%20zh-orange.svg)](#provider-notes)
 [![Threshold](https://img.shields.io/badge/SIMILARITY__THRESHOLD-0.32-informational.svg)](#provider-notes)
-[![Port](https://img.shields.io/badge/demo-127.0.0.1%3A8766-0ea5e9.svg)](#quickstart)
+[![Port](https://img.shields.io/badge/demo-localhost%3A8766-0ea5e9.svg)](#quickstart)
 [![Mode](https://img.shields.io/badge/SIMPLE__RAG-default-success.svg)](#architecture)
 [![UI](https://img.shields.io/badge/UI-static%20HTML%2FCSS%2FJS-lightgrey.svg)](#preview)
 [![Not advice](https://img.shields.io/badge/Not%20regulated%20insurance%20advice-critical.svg)](#disclaimer)
 
-![Visitors](https://api.visitorbadge.io/api/VisitorHit?user=Phoenix0531-sudo&repo=InsurIntellect-Agent&countColor=%231D9CFF)
+![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
 <p align="center">
   <img src="docs/screenshots/preview.png" alt="Main dual-pane UI" width="48%" />
