@@ -3,7 +3,7 @@
 """
 
 from sqlalchemy import MetaData
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     create_async_engine,

@@ -44,6 +44,15 @@ class StructuredLogger:
                 file_handler = logging.FileHandler(log_file, encoding='utf-8')
                 file_handler.setFormatter(formatter)
                 self.logger.addHandler(file_handler)
+
+    def close(self):
+        """Close all handlers attached to this logger."""
+        for handler in self.logger.handlers[:]:
+            try:
+                handler.close()
+                self.logger.removeHandler(handler)
+            except Exception:
+                pass
     
     def _create_log_entry(self, level: str, event: str, **kwargs) -> Dict[str, Any]:
         """

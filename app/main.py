@@ -127,6 +127,17 @@ async def lifespan(app: FastAPI):
         logger.warning(f"关闭 ChromaDB 资源失败: {e}")
     structured_logger.log_system_event("application_shutdown")
 
+    # Close file handlers to avoid ResourceWarning on test teardown
+    for handler in logging.getLogger().handlers:
+        try:
+            handler.close()
+        except Exception:
+            pass
+    try:
+        structured_logger.close()
+    except Exception:
+        pass
+
 
 # 创建FastAPI应用实例
 app = FastAPI(

@@ -1,11 +1,12 @@
 # ---------- deps stage (cached layer) ----------
 FROM python:3.11-slim AS deps
 
-ENV PIP_NO_CACHE_DIR=1
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_NO_COMPILE=1
 WORKDIR /app
 
 COPY requirements-docker.txt .
-RUN pip install --no-cache-dir -r requirements-docker.txt
+RUN pip install --no-cache-dir --no-compile -r requirements-docker.txt
 
 # ---------- runtime stage ----------
 FROM python:3.11-slim AS runtime
