@@ -20,7 +20,7 @@ chromadb>=0.5.0
 
 # Main-path PDF ingestion
 PyMuPDF>=1.28.0
-python-multipart>=0.0.20
+python-multipart>=0.0.32
 
 # Database
 sqlalchemy>=2.0.0
