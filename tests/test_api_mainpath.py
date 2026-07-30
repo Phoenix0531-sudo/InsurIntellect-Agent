@@ -188,3 +188,44 @@ def test_advice_and_offtopic_helpers():
     svc = QueryService()
     assert svc._is_advice_or_guarantee_question("这份保单保证我一定能获赔吗？")
     assert svc._is_off_topic("今天北京天气怎么样？", [])
+
+
+def test_score_gate_prefers_vector_score_over_rrf():
+    from app.services import citation_policy
+
+    chunk = {
+        "similarity_score": 0.031,
+        "metadata": {"rrf_score": 0.031, "vector_score": 0.74},
+        "content": "等待期为九十天，本合同另有约定的除外。",
+    }
+    assert citation_policy.chunk_gate_score(chunk) == 0.74
+
+
+def test_refusal_policy_keeps_advice_and_weather_out_of_public_answers():
+    from app.services import refusal_policy
+
+    assert refusal_policy.is_advice_or_guarantee_question("这份保单保证我一定能获赔吗？")
+    assert refusal_policy.is_off_topic("今天北京天气怎么样？", [])
+    assert "不构成保险销售或理赔承诺" in refusal_policy.refusal_answer("advice")
+
+
+def test_response_shaping_preserves_display_name_and_public_score():
+    from app.services import response_shaping
+
+    chunks = [
+        {
+            "chunk_id": "7",
+            "document_id": "sample-critical",
+            "display_name": "示例重大疾病保险条款",
+            "content": "责任免除包括酒驾。",
+            "page_number": "4",
+            "similarity_score": 0.66,
+            "metadata": {"filename": "sample_critical_illness.pdf"},
+        }
+    ]
+    out = response_shaping.to_retrieved_chunks(chunks)
+    assert out[0].chunk_id == 7
+    assert out[0].document_id == "sample-critical"
+    assert out[0].document_name == "示例重大疾病保险条款"
+    assert out[0].page_number == 4
+    assert out[0].similarity_score == 0.66

@@ -223,8 +223,7 @@ cd InsurIntellect-Agent
 uv venv .venv --python 3.11
 # Windows: .venv\Scripts\activate
 source .venv/bin/activate
-uv pip install -r requirements.txt
-uv pip install pytest ruff httpx
+uv pip install -r requirements-dev.txt
 
 cp .env.example .env
 # set OPENAI_BASE_URL / OPENAI_API_KEY for your OpenAI-compatible gateway
@@ -268,7 +267,20 @@ API docs (when `DEBUG=true`): **http://127.0.0.1:8766/docs**
 
 If the LLM key is missing, the API still returns an honest **LLM unavailable** path instead of inventing coverage.
 
-### 4. Fixed smoke (server must be up)
+### 4. Optional Docker service
+
+Use Compose when you want a persistent local service with a predictable container name:
+
+```bash
+docker compose up -d --build
+docker compose ps
+# container: insurintellect-agent
+# URL: http://[IP]:8766/
+```
+
+The Compose file intentionally sets `container_name: insurintellect-agent` to avoid anonymous or ambiguous Docker Desktop entries.
+
+### 5. Fixed smoke (server must be up)
 
 ```bash
 # Linux/macOS/git-bash
@@ -330,7 +342,11 @@ InsurIntellect-Agent
 │   ├── core/                   # config, fusion, rag_workflow (backend retrieve)
 │   ├── models/                 # schemas + lightweight DB models
 │   ├── services/
-│   │   ├── query_service.py    # SIMPLE path, refuse, public_citations
+│   │   ├── query_service.py    # orchestration wrapper around the main ask path
+│   │   ├── citation_policy.py  # citation curation, score gate, public evidence
+│   │   ├── refusal_policy.py   # advice/off-topic refusal boundary
+│   │   ├── response_shaping.py # stable retrieved_chunks schema
+│   │   ├── query_history_service.py
 │   │   ├── embedding_service.py
 │   │   └── llm_service.py
 │   └── prompts.py
@@ -347,7 +363,11 @@ InsurIntellect-Agent
 ├── tests/                      # CI without live LLM keys
 ├── docs/screenshots/
 ├── .env.example
-└── requirements.txt
+├── requirements.txt           # lightweight main path
+├── requirements-advanced.txt  # optional OCR / unstructured parsing
+├── requirements-dev.txt
+├── docker-compose.yml         # fixed container_name: insurintellect-agent
+└── pyproject.toml             # ruff / pytest tool config
 ```
 
 ---
@@ -381,7 +401,7 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 - Full PDF.js reader as a product requirement (assets may exist for highlight demos)
 - Productized text-to-SQL / KG / multi-agent orchestration UI
 
-Docker (`Dockerfile`, default port 8000) is optional. Portfolio demos prefer **uv + 8766**.
+Docker is optional but now follows the same **8766** service port. Compose fixes the readable container name as `insurintellect-agent`, so it is easy to identify in Docker Desktop.
 
 ---
 

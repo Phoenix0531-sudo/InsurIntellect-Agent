@@ -9,19 +9,20 @@ from typing import List, Dict, Any, Optional
 import json
 from functools import lru_cache
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.app_logging import get_logger
-from app.models.database_models import QueryHistory, Document, DocumentChunk
+from app.models.database_models import QueryHistory
 from app.models.schemas import QueryRequest, QueryResponse, RetrievedChunk, QueryStatistics
 from app.core.rag_workflow import get_agent
-from app.core.database import db_manager
+
 from app.services.llm_service import LLMService
 from app.services.query_rewriter_service import QueryRewriterService
 from app.services.query_router_service import QueryRouterService
 from app.services.text_to_sql_service import TextToSQLService
 from app.services.kg_service import KGService
+from app.services import citation_policy, refusal_policy, response_shaping, query_history_service
 
 logger = get_logger(__name__)
 
@@ -81,55 +82,16 @@ class QueryService:
     )
 
     def _chunk_text(self, c: Dict[str, Any]) -> str:
-        content = c.get("content")
-        if content is None:
-            return ""
-        return content if isinstance(content, str) else str(content)
+        return citation_policy.chunk_text(c)
 
     def _is_weak_citation_chunk(self, c: Dict[str, Any]) -> bool:
-        """True for cover/metadata-only snippets that should not lead citations."""
-        text = self._chunk_text(c).strip()
-        if not text:
-            return True
-        if len(text) < 40 and not any(m in text for m in self._CLAUSE_MARKERS):
-            return True
-        meta_hits = sum(1 for m in self._WEAK_META_MARKERS if m in text)
-        clause_hits = sum(1 for m in self._CLAUSE_MARKERS if m in text)
-        if meta_hits >= 2 and clause_hits <= 1 and len(text) < 280:
-            return True
-        if meta_hits >= 3 and clause_hits == 0:
-            return True
-        return False
+        return citation_policy.is_weak_citation_chunk(c)
 
     def _doc_page_key(self, c: Dict[str, Any]) -> str:
-        md = c.get("metadata") if isinstance(c.get("metadata"), dict) else {}
-        name = (
-            c.get("document_name")
-            or md.get("document_title")
-            or md.get("filename")
-            or md.get("source")
-            or "unknown"
-        )
-        page = c.get("page_number")
-        if page is None:
-            page = md.get("page_number")
-        return f"{str(name).strip().lower()}|{page}"
+        return citation_policy.doc_page_key(c)
 
     def _relevance_bonus(self, question: str, c: Dict[str, Any]) -> float:
-        q = question or ""
-        text = self._chunk_text(c)
-        bonus = 0.0
-        for kw in (
-            "等待期", "犹豫期", "责任免除", "免赔额", "免赔",
-            "酒驾", "自杀", "重大疾病", "身故", "理赔",
-        ):
-            if kw in q and kw in text:
-                bonus += 0.15
-        if any(m in text for m in self._CLAUSE_MARKERS):
-            bonus += 0.05
-        if self._is_weak_citation_chunk(c):
-            bonus -= 0.5
-        return bonus
+        return citation_policy.relevance_bonus(question, c)
 
     def curate_citations(
         self,
@@ -138,67 +100,7 @@ class QueryService:
         *,
         limit: int = 4,
     ) -> List[Dict[str, Any]]:
-        """Dedupe + drop weak cover chunks + keep top-N for answer [1]..[N]."""
-        if not chunks:
-            return []
-        limit = max(1, min(int(limit or 4), 8))
-        scored: List[tuple[float, int, Dict[str, Any]]] = []
-        for idx, raw in enumerate(chunks):
-            if not isinstance(raw, dict):
-                continue
-            c = dict(raw)
-            md = c.get("metadata") if isinstance(c.get("metadata"), dict) else {}
-            if not c.get("document_name"):
-                c["document_name"] = (
-                    md.get("document_title")
-                    or md.get("filename")
-                    or md.get("display_name")
-                    or "未知文档"
-                )
-            if c.get("page_number") is None and md.get("page_number") is not None:
-                c["page_number"] = md.get("page_number")
-            if not c.get("content"):
-                c["content"] = self._chunk_text(c)
-            try:
-                base = float(c.get("similarity_score") or 0.0)
-            except Exception:
-                base = 0.0
-            try:
-                if isinstance(md, dict):
-                    for k in ("rrf_score", "final_score", "bm25_score", "vector_score"):
-                        if md.get(k) is not None:
-                            base = max(base, float(md.get(k)))
-            except Exception:
-                pass
-            score = base + self._relevance_bonus(question, c)
-            if self._is_weak_citation_chunk(c):
-                score -= 1.0
-            scored.append((score, idx, c))
-        scored.sort(key=lambda t: (-t[0], t[1]))
-        strong = [t for t in scored if not self._is_weak_citation_chunk(t[2])]
-        pool = strong if strong else scored
-        selected: List[Dict[str, Any]] = []
-        seen_pages: set = set()
-        seen_prefix: set = set()
-        for _score, _idx, c in pool:
-            key = self._doc_page_key(c)
-            text = self._chunk_text(c).strip()
-            prefix = text[:48]
-            if key in seen_pages:
-                continue
-            if prefix and prefix in seen_prefix:
-                continue
-            seen_pages.add(key)
-            if prefix:
-                seen_prefix.add(prefix)
-            selected.append(c)
-            if len(selected) >= limit:
-                break
-        if not selected:
-            selected = [t[2] for t in scored[:limit]]
-        return selected
-
-
+        return citation_policy.curate_citations(chunks, question, limit=limit)
 
     def public_citations(
         self,
@@ -207,31 +109,7 @@ class QueryService:
         for_ui: bool = True,
         min_score: float = 0.0,
     ) -> List[Dict[str, Any]]:
-        """Keep only chunks with a real similarity for UI/API honesty.
-
-        Padding / zero-score fillers are dropped so refusal and weak hits
-        do not look like fake evidence.
-        """
-        out: List[Dict[str, Any]] = []
-        for c in chunks or []:
-            if not isinstance(c, dict):
-                continue
-            try:
-                score = float(self._chunk_gate_score(c))
-            except Exception:
-                try:
-                    score = float(c.get("similarity_score") or 0.0)
-                except Exception:
-                    score = 0.0
-            if score <= float(min_score or 0.0):
-                continue
-            if self._is_weak_citation_chunk(c):
-                continue
-            cc = dict(c)
-            # store normalized score for display honesty
-            cc["similarity_score"] = round(max(0.0, min(1.0, score)), 4)
-            out.append(cc)
-        return out
+        return citation_policy.public_citations(chunks, min_score=min_score)
 
     def citations_for_kind(
         self,
@@ -240,127 +118,10 @@ class QueryService:
         *,
         min_score: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
-        """Policy: refusal/advice/degraded -> no public sources; answer keeps scored ones."""
-        k = (kind or "answer").lower()
-        if k in ("refusal", "advice", "degraded", "insufficient_evidence"):
-            return []
-        thr = min_score
-        # for answer / llm_unavailable keep real cosine-like scores;
-        # drop pure RRF filler ranks (~0.03) that look like fake evidence.
-        if thr is None or float(thr) <= 0.0:
-            thr = 0.05
-        return self.public_citations(chunks, min_score=float(thr))
+        return citation_policy.citations_for_kind(kind, chunks, min_score=min_score)
 
     def _to_retrieved_chunks(self, chunks: List[Dict[str, Any]]) -> List[RetrievedChunk]:
-        """Normalize raw retrieval dicts into RetrievedChunk models."""
-        normalized: List[RetrievedChunk] = []
-        for c in chunks or []:
-            md = c.get("metadata") if isinstance(c.get("metadata"), dict) else {}
-
-            chunk_id_raw = c.get("chunk_id") if c.get("chunk_id") is not None else md.get("chunk_id")
-            chunk_id_val: Any = -1
-            if isinstance(chunk_id_raw, int):
-                chunk_id_val = chunk_id_raw
-            elif isinstance(chunk_id_raw, str) and chunk_id_raw.strip():
-                s = chunk_id_raw.strip()
-                try:
-                    chunk_id_val = int(s)
-                except Exception:
-                    chunk_id_val = s
-            elif chunk_id_raw is not None:
-                chunk_id_val = str(chunk_id_raw)
-
-            doc_id_raw = c.get("document_id") if c.get("document_id") is not None else md.get("document_id")
-            document_id_val: Any = -1
-            if isinstance(doc_id_raw, int):
-                document_id_val = doc_id_raw
-            elif isinstance(doc_id_raw, str) and doc_id_raw.strip():
-                s = doc_id_raw.strip()
-                try:
-                    document_id_val = int(s)
-                except Exception:
-                    document_id_val = s
-            elif doc_id_raw is not None:
-                document_id_val = str(doc_id_raw)
-
-            document_name_val = (
-                c.get("document_name")
-                or md.get("display_name")
-                or md.get("document_title")
-                or md.get("filename")
-                or "未知文档"
-            )
-
-            content_val = c.get("content") if c.get("content") is not None else ""
-            if not isinstance(content_val, str):
-                try:
-                    content_val = str(content_val)
-                except Exception:
-                    content_val = ""
-
-            page_raw = c.get("page_number")
-            if page_raw is None:
-                page_raw = md.get("page_number")
-            page_val: Optional[int]
-            if isinstance(page_raw, int):
-                page_val = page_raw
-            elif isinstance(page_raw, str):
-                try:
-                    page_val = int(page_raw)
-                except Exception:
-                    page_val = None
-            else:
-                page_val = None
-
-            # Prefer already-normalized public score on the chunk first so
-            # public_citations filtering is not undone by metadata fallbacks.
-            rd = md.get("ranking_details") if isinstance(md.get("ranking_details"), dict) else {}
-            candidates = [
-                c.get("similarity_score"),
-                md.get("vector_score"),
-                c.get("vector_score"),
-                rd.get("original_similarity") if rd else None,
-            ]
-            sim_val = 0.0
-            for sim_raw in candidates:
-                if sim_raw is None:
-                    continue
-                try:
-                    v = float(sim_raw)
-                except Exception:
-                    continue
-                if v < 0.0:
-                    v = 0.0
-                if v > 1.0:
-                    # distance-like or oversized — normalize lightly
-                    if v <= 2.0:
-                        v = max(0.0, min(1.0, 1.0 - v)) if v > 1.0 else v
-                    else:
-                        v = max(0.0, min(1.0, 1.0 / (1.0 + v)))
-                if v > 0.0:
-                    sim_val = v
-                    break
-            else:
-                sim_val = 0.0
-
-            metadata_val = dict(md) if isinstance(md, dict) else {}
-            if c.get("display_name") and "display_name" not in metadata_val:
-                metadata_val["display_name"] = c.get("display_name")
-            if not metadata_val:
-                metadata_val = None
-
-            normalized.append(
-                RetrievedChunk(
-                    chunk_id=chunk_id_val,
-                    document_id=document_id_val,
-                    document_name=document_name_val,
-                    content=content_val,
-                    page_number=page_val,
-                    similarity_score=sim_val,
-                    metadata=metadata_val,
-                )
-            )
-        return normalized
+        return response_shaping.to_retrieved_chunks(chunks)
 
     async def _get_chat_history(
         self,
@@ -401,112 +162,25 @@ class QueryService:
     
 
     def _normalize_sim(self, score: Any) -> float:
-        try:
-            s = float(score)
-        except Exception:
-            return 0.0
-        if 0.0 <= s <= 1.0:
-            return s
-        if s > 1.0:
-            if s <= 2.0:
-                return max(0.0, min(1.0, 1.0 - s))
-            return max(0.0, min(1.0, 1.0 / (1.0 + s)))
-        return 0.0
+        return citation_policy.normalize_sim(score)
 
     def _chunk_gate_score(self, c: Dict[str, Any]) -> float:
-        """Score used by refusal gate: prefer cosine vector_score over RRF (~0.03)."""
-        md = c.get("metadata") if isinstance(c.get("metadata"), dict) else {}
-        rd = md.get("ranking_details") if isinstance(md.get("ranking_details"), dict) else {}
-        # Prefer true cosine-like scores first; ignore tiny RRF unless nothing else.
-        preferred = [
-            rd.get("original_similarity"),
-            md.get("vector_score"),
-            c.get("vector_score"),
-        ]
-        best = 0.0
-        for s in preferred:
-            if s is None:
-                continue
-            best = max(best, self._normalize_sim(s))
-        if best > 0:
-            return best
-        fallback = [
-            c.get("similarity_score"),
-            md.get("bm25_score"),
-            rd.get("final_score"),
-            md.get("rrf_score"),
-        ]
-        for s in fallback:
-            if s is None:
-                continue
-            best = max(best, self._normalize_sim(s))
-        return best
+        return citation_policy.chunk_gate_score(c)
 
     def _best_similarity(self, chunks: List[Dict[str, Any]]) -> float:
-        best = 0.0
-        for c in chunks or []:
-            try:
-                best = max(best, self._chunk_gate_score(c))
-            except Exception:
-                continue
-        return best
+        return citation_policy.best_similarity(chunks)
 
     def _refusal_answer(self, reason: str = "insufficient_evidence") -> str:
-        if reason == "advice":
-            return (
-                "【结论】\n"
-                "本系统不能给出是否购买保险、是否一定获赔的建议或承诺。\n\n"
-                "【条款依据】\n"
-                "演示语料仅用于说明犹豫期、等待期、责任免除等条款检索；"
-                "真实核保与理赔取决于正式合同与事故事实。\n\n"
-                "【不确定/边界】\n"
-                "本系统不构成保险销售或理赔承诺。"
-            )
-        return (
-            "【结论】\n"
-            "未在已入库条款中找到充分依据，无法就该问题给出有引用支撑的结论。\n\n"
-            "【条款依据】\n"
-            "当前检索结果为空或相关度不足，请换用条款中的术语（如等待期、免赔额、责任免除）重试。\n\n"
-            "【不确定/边界】\n"
-            "本系统不构成保险销售或理赔承诺。"
-        )
+        return refusal_policy.refusal_answer(reason)
 
     def _is_advice_or_guarantee_question(self, question: str) -> bool:
-        q = (question or "").strip()
-        markers = [
-            "一定能获赔",
-            "保证获赔",
-            "该不该买",
-            "应不应该买",
-            "推荐购买",
-            "帮我配置",
-            "今天买",
-            "保证理赔",
-        ]
-        return any(m in q for m in markers)
+        return refusal_policy.is_advice_or_guarantee_question(question)
 
     def _has_llm_credentials(self) -> bool:
         return bool((settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY or "").strip())
 
     def _is_off_topic(self, question: str, chunks: List[Dict[str, Any]]) -> bool:
-        """Heuristic off-topic gate for demo corpus (weather / chit-chat)."""
-        q = (question or "").strip()
-        insurance_kw = [
-            "保险", "条款", "等待期", "免赔", "责任免除", "犹豫期", "理赔", "保额",
-            "身故", "重疾", "投保", "保单", "除外", "酒驾", "自杀",
-        ]
-        if any(k in q for k in insurance_kw):
-            return False
-        # non-insurance chit-chat markers
-        chat_kw = ["天气", "北京", "上海", "你好", "讲个笑话", "股票", "足球"]
-        if any(k in q for k in chat_kw):
-            return True
-        # weak overlap with top chunk text
-        if not chunks:
-            return True
-        top = (chunks[0].get("content") or "")
-        overlap = sum(1 for k in insurance_kw if k in top and k in q)
-        return overlap == 0 and len(q) < 40 and not any(c in q for c in "等待免赔责任犹豫理赔保")
+        return refusal_policy.is_off_topic(question, chunks)
 
 
     async def process_query(
@@ -1403,7 +1077,6 @@ class QueryService:
 
                 # 进行流式生成（仅透传 token 事件；end 事件统一由此方法发送）
                 final_text = ""
-                tokens_used = 0
                 response_time = 0.0
                 async for ev in llm_core.stream_answer(request.question, retrieved_chunks):
                     etype = ev.get("type")
@@ -1411,7 +1084,6 @@ class QueryService:
                         final_text += ev.get("content", "")
                         yield ev
                     elif etype == "end":
-                        tokens_used = int(ev.get("tokens_used", 0) or 0)
                         response_time = float(ev.get("response_time", 0.0) or 0.0)
                     elif etype == "error":
                         # 输出错误并保存历史
@@ -1515,66 +1187,20 @@ class QueryService:
         session_id: Optional[str] = None,
         rewritten_query: Optional[str] = None,
         rewriting_metadata_json: Optional[str] = None,
-        retrieved_chunks_json: Optional[str] = None
+        retrieved_chunks_json: Optional[str] = None,
     ) -> Optional[int]:
-        """保存查询历史"""
-        try:
-            # 确保数据库存在重写相关列（无迁移环境下的轻量DDL，SQLite 适配）
-            try:
-                pragma = await db.execute(text("PRAGMA table_info('query_history')"))
-                rows = pragma.all()
-                cols = {row[1] if len(row) > 1 else (row.get('name') if isinstance(row, dict) else None) for row in rows}
-                cols = {c for c in cols if c}
-                alter_sqls = []
-                if 'session_id' not in cols:
-                    alter_sqls.append("ALTER TABLE query_history ADD COLUMN session_id TEXT")
-                if 'rewritten_query' not in cols:
-                    alter_sqls.append("ALTER TABLE query_history ADD COLUMN rewritten_query TEXT")
-                if 'rewriting_metadata_json' not in cols:
-                    alter_sqls.append("ALTER TABLE query_history ADD COLUMN rewriting_metadata_json TEXT")
-                if 'retrieved_chunks' not in cols:
-                    alter_sqls.append("ALTER TABLE query_history ADD COLUMN retrieved_chunks TEXT")
-                for sql in alter_sqls:
-                    await db.execute(text(sql))
-                if alter_sqls:
-                    await db.commit()
-            except Exception:
-                # 若检查或DDL失败，不影响后续保存（可能是首次建表或权限限制）
-                try:
-                    await db.rollback()
-                except Exception:
-                    pass
-
-            # 创建查询历史记录
-            query_history = QueryHistory(
-                query=question,
-                response=answer,
-                model_used=query_type,
-                response_time=response_time,
-                retrieved_chunks=retrieved_chunks_json,
-                tokens_used=None,
-                cost=None,
-                rating=None,
-                feedback=None,
-                session_id=session_id,
-                rewritten_query=rewritten_query,
-                rewriting_metadata_json=rewriting_metadata_json
-            )
-            
-            db.add(query_history)
-            await db.commit()
-            await db.refresh(query_history)
-            
-            logger.info(f"查询历史保存成功,ID: {query_history.id}")
-            return query_history.id
-            
-        except Exception as e:
-            logger.error(f"保存查询历史失败: {e}")
-            try:
-                await db.rollback()
-            except Exception:
-                pass
-            return None
+        return await query_history_service.save_query_history(
+            db=db,
+            question=question,
+            answer=answer,
+            query_type=query_type,
+            response_time=response_time,
+            chunks_used=chunks_used,
+            session_id=session_id,
+            rewritten_query=rewritten_query,
+            rewriting_metadata_json=rewriting_metadata_json,
+            retrieved_chunks_json=retrieved_chunks_json,
+        )
 
     async def _save_query_history_bg(
         self,
@@ -1588,23 +1214,17 @@ class QueryService:
         rewriting_metadata_json: Optional[str] = None,
         retrieved_chunks_json: Optional[str] = None,
     ) -> None:
-        """后台保存查询历史：自行创建/关闭会话，避免阻塞主请求。"""
-        try:
-            async with db_manager.SessionLocal() as session:
-                await self._save_query_history(
-                    db=session,
-                    question=question,
-                    answer=answer,
-                    query_type=query_type,
-                    response_time=response_time,
-                    chunks_used=chunks_used,
-                    session_id=session_id,
-                    rewritten_query=rewritten_query,
-                    rewriting_metadata_json=rewriting_metadata_json,
-                    retrieved_chunks_json=retrieved_chunks_json,
-                )
-        except Exception as e:
-            logger.debug(f"后台保存查询历史失败: {e}")
+        await query_history_service.save_query_history_bg(
+            question=question,
+            answer=answer,
+            query_type=query_type,
+            response_time=response_time,
+            chunks_used=chunks_used,
+            session_id=session_id,
+            rewritten_query=rewritten_query,
+            rewriting_metadata_json=rewriting_metadata_json,
+            retrieved_chunks_json=retrieved_chunks_json,
+        )
 
     async def get_query_history(
         self,
@@ -1613,155 +1233,33 @@ class QueryService:
         limit: int = 50,
         query_type: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> List[QueryHistory]:
-        """获取查询历史"""
-        try:
-            stmt = select(QueryHistory)
-
-            # 数据库模型使用 model_used 作为查询类型字段
-            if query_type:
-                stmt = stmt.where(QueryHistory.model_used == query_type)
-
-            # 统一使用 created_time 字段进行时间过滤
-            if start_date:
-                stmt = stmt.where(QueryHistory.created_time >= start_date)
-
-            if end_date:
-                stmt = stmt.where(QueryHistory.created_time <= end_date)
-
-            stmt = stmt.order_by(QueryHistory.created_time.desc()).offset(skip).limit(limit)
-            result = await db.execute(stmt)
-            history = result.scalars().all()
-
-            logger.info(f"获取查询历史成功,共 {len(history)} 条记录")
-            return history
-
-        except Exception as e:
-            logger.error(f"获取查询历史失败: {e}")
-            return []
+        return await query_history_service.get_query_history(
+            db=db,
+            skip=skip,
+            limit=limit,
+            query_type=query_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
     async def update_query_feedback(
         self,
         db: AsyncSession,
         query_id: int,
         rating: int,
-        comment: Optional[str] = None
+        comment: Optional[str] = None,
     ) -> bool:
-        """更新查询反馈"""
-        try:
-            result = await db.execute(select(QueryHistory).where(QueryHistory.id == query_id))
-            query_history = result.scalar_one_or_none()
-
-            if not query_history:
-                logger.warning(f"查询记录不存在: {query_id}")
-                return False
-
-            # 与数据库模型字段对齐
-            query_history.rating = rating
-            query_history.feedback = comment
-            await db.commit()
-
-            logger.info(f"查询反馈更新成功: query_id={query_id}, rating={rating}")
-            return True
-
-        except Exception as e:
-            logger.error(f"更新查询反馈失败: {e}")
-            try:
-                await db.rollback()
-            except Exception:
-                pass
-            return False
+        return await query_history_service.update_query_feedback(
+            db=db,
+            query_id=query_id,
+            rating=rating,
+            comment=comment,
+        )
 
     async def get_query_statistics(self, db: AsyncSession, days: int = 30) -> QueryStatistics:
-        """获取查询统计信息"""
-        try:
-            from datetime import timedelta
-
-            # 计算时间范围
-            end_date = datetime.utcnow()
-            start_date = end_date - timedelta(days=days)
-
-            # 总查询数
-            total_queries = (
-                await db.execute(
-                    select(func.count()).select_from(QueryHistory).where(
-                        QueryHistory.created_time >= start_date
-                    )
-                )
-            ).scalar() or 0
-
-            # 平均响应时间
-            avg_response_time = (
-                await db.execute(
-                    select(func.avg(QueryHistory.response_time)).where(
-                        QueryHistory.created_time >= start_date
-                    )
-                )
-            ).scalar() or 0
-
-            # 平均评分
-            avg_rating = (
-                await db.execute(
-                    select(func.avg(QueryHistory.rating)).where(
-                        QueryHistory.rating.isnot(None),
-                        QueryHistory.created_time >= start_date,
-                    )
-                )
-            ).scalar() or 0
-
-            # 今日查询数
-            today = datetime.utcnow().date()
-            today_queries = (
-                await db.execute(
-                    select(func.count()).select_from(QueryHistory).where(
-                        func.date(QueryHistory.created_time) == today
-                    )
-                )
-            ).scalar() or 0
-
-            # 查询类型分布 - 由于数据库模型中没有query_type字段,使用model_used代替
-            type_stmt = (
-                select(
-                    QueryHistory.model_used,
-                    func.count(QueryHistory.model_used).label('count')
-                )
-                .where(QueryHistory.created_time >= start_date)
-                .group_by(QueryHistory.model_used)
-            )
-            type_result = await db.execute(type_stmt)
-            query_type_stats = type_result.all()
-
-            query_type_distribution = {stat[0]: stat[1] for stat in query_type_stats}
-
-            stats = QueryStatistics(
-                total_queries=total_queries,
-                avg_response_time=round(avg_response_time, 3),
-                avg_rating=round(avg_rating, 2),
-                today_queries=today_queries,
-                query_type_distribution=query_type_distribution,
-                period_days=days,
-                avg_chunks_used=0.0,  # 添加缺失字段
-                avg_confidence_score=0.0,  # 添加缺失字段
-                feedback_stats={}  # 添加缺失字段
-            )
-
-            logger.info("查询统计信息获取成功")
-            return stats
-
-        except Exception as e:
-            logger.error(f"获取查询统计信息失败: {e}")
-            return QueryStatistics(
-                total_queries=0,
-                avg_response_time=0,
-                avg_rating=0,
-                today_queries=0,
-                query_type_distribution={},
-                period_days=days,
-                avg_chunks_used=0.0,  # 添加缺失字段
-                avg_confidence_score=0.0,  # 添加缺失字段
-                feedback_stats={}  # 添加缺失字段
-            )
+        return await query_history_service.get_query_statistics(db, days=days)
 
 
 @lru_cache(maxsize=1)

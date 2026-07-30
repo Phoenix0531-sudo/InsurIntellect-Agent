@@ -223,8 +223,7 @@ cd InsurIntellect-Agent
 uv venv .venv --python 3.11
 # Windows: .venv\Scripts\activate
 source .venv/bin/activate
-uv pip install -r requirements.txt
-uv pip install pytest ruff httpx
+uv pip install -r requirements-dev.txt
 
 cp .env.example .env
 # 填写 OPENAI_BASE_URL / OPENAI_API_KEY（OpenAI 兼容网关）
@@ -268,7 +267,20 @@ OpenAPI（`DEBUG=true` 时）：**http://127.0.0.1:8766/docs**
 
 无 API Key 时：接口走诚实的 **LLM 不可用** 路径，不静默编造保障范围。
 
-### 4. 固定回归（服务需已启动）
+### 4. 可选 Docker 服务
+
+需要长期放在 Docker Desktop 里运行时，优先用 Compose，容器名固定、可识别：
+
+```bash
+docker compose up -d --build
+docker compose ps
+# container: insurintellect-agent
+# URL: http://[IP]:8766/
+```
+
+`docker-compose.yml` 明确设置 `container_name: insurintellect-agent`，避免出现一堆匿名项目容器时分不清哪个是哪个。
+
+### 5. 固定回归（服务需已启动）
 
 ```bash
 # Linux/macOS/git-bash
@@ -330,7 +342,11 @@ InsurIntellect-Agent
 │   ├── core/                   # config、fusion、rag_workflow（检索后端）
 │   ├── models/                 # schemas + 轻量 DB 模型
 │   ├── services/
-│   │   ├── query_service.py    # SIMPLE 路径、拒答、public_citations
+│   │   ├── query_service.py    # 主问答编排包装层
+│   │   ├── citation_policy.py  # 引用筛选、分数门闩、公开证据策略
+│   │   ├── refusal_policy.py   # 建议/离题拒答边界
+│   │   ├── response_shaping.py # 稳定 retrieved_chunks schema
+│   │   ├── query_history_service.py
 │   │   ├── embedding_service.py
 │   │   └── llm_service.py
 │   └── prompts.py
@@ -347,7 +363,11 @@ InsurIntellect-Agent
 ├── tests/                      # CI 不依赖真实 LLM Key
 ├── docs/screenshots/
 ├── .env.example
-└── requirements.txt
+├── requirements.txt           # 轻量主路径
+├── requirements-advanced.txt  # 可选 OCR / unstructured 解析
+├── requirements-dev.txt
+├── docker-compose.yml         # 固定 container_name: insurintellect-agent
+└── pyproject.toml             # ruff / pytest 工具配置
 ```
 
 ---
@@ -381,7 +401,7 @@ GitHub Actions 跑同一套 critical ruff + `pytest tests/`，**不要求** 在�
 - 完整 PDF 阅读器作为一期硬需求（资源可能用于高亮演示）
 - 产品化 text-to-SQL / KG / 多 Agent 编排 UI
 
-Docker（`Dockerfile`，默认 8000）可选。作品集演示优先 **uv + 8766**。
+Docker 可选，但现在也统一使用 **8766** 服务端口。Compose 固定容器名为 `insurintellect-agent`，方便在 Docker Desktop 里识别。
 
 ---
 

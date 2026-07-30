@@ -210,83 +210,110 @@ class DocumentParserService:
         return docs
 
     def _fallback_parse_pdf(self, pdf_path: Path, source_group: str, document_type: str) -> List[Document]:
-        """当 unstructured 无法使用时的回退解析：使用 PyPDF2/pypdf 逐页提取文本并进行二级 token 分割。"""
+        """Fallback parser for the lightweight demo path.
+
+        PyMuPDF is the main-path dependency. pypdf/PyPDF2 and OCR libraries are
+        optional and live in requirements-advanced.txt.
+        """
+        docs: List[Document] = []
+
+        # Main lightweight path: PyMuPDF text extraction.
+        try:
+            import fitz  # type: ignore
+
+            with fitz.open(str(pdf_path)) as pdf_doc:
+                for page_index in range(pdf_doc.page_count):
+                    page = pdf_doc.load_page(page_index)
+                    text = page.get_text("text") or ""
+                    if not text.strip():
+                        continue
+                    base_meta = {
+                        "source_file": pdf_path.name,
+                        "file_path": str(pdf_path),
+                        "page_number": page_index + 1,
+                        "layout_type": "page_text",
+                        "bbox": None,
+                        "source_group": source_group,
+                        "document_type": document_type,
+                    }
+                    for sub in self._token_split(text):
+                        docs.append(Document(page_content=sub, metadata=base_meta))
+            if docs:
+                logger.info(f"PyMuPDF 回退解析完成: {pdf_path.name}, 生成基础块 {len(docs)}")
+                return docs
+        except Exception as e:
+            logger.warning(f"PyMuPDF 回退解析失败，尝试 advanced 解析器: {e}")
+
+        # Optional text fallback from requirements-advanced.txt.
         try:
             try:
                 from PyPDF2 import PdfReader  # type: ignore
             except Exception:
                 from pypdf import PdfReader  # type: ignore
         except Exception as e:
-            logger.error(f"未安装 PDF 解析后备库: {e}")
+            logger.warning(f"未安装 pypdf/PyPDF2 advanced 后备库: {e}")
             return []
 
-        docs: List[Document] = []
         try:
             reader = PdfReader(str(pdf_path))
-            for i, page in enumerate(getattr(reader, "pages", []), start=1):
+            for index, page in enumerate(getattr(reader, "pages", []), start=1):
                 try:
                     text = page.extract_text() or ""
                 except Exception:
                     text = ""
                 if not text.strip():
-                    # 尝试使用 PyMuPDF 文本提取作为第一回退
-                    try:
-                        import fitz  # type: ignore
-                        with fitz.open(str(pdf_path)) as doc:
-                            if i - 1 < doc.page_count:
-                                page_obj = doc.load_page(i - 1)
-                                text = page_obj.get_text("text") or ""
-                    except Exception:
-                        text = text or ""
-                    # 若仍为空，进行 OCR 回退（适用于扫描版 PDF）
-                    if not text.strip():
-                        try:
-                            import fitz  # type: ignore
-                            import pytesseract  # type: ignore
-                            from PIL import Image  # type: ignore
-
-                            tcmd = os.getenv("TESSERACT_CMD", "").strip()
-                            if tcmd:
-                                try:
-                                    pytesseract.pytesseract.tesseract_cmd = tcmd
-                                except Exception:
-                                    pass
-
-                            with fitz.open(str(pdf_path)) as doc:
-                                if i - 1 < doc.page_count:
-                                    page_obj = doc.load_page(i - 1)
-                                    pix = page_obj.get_pixmap(matrix=fitz.Matrix(2, 2))
-                                    mode = "RGB" if pix.n < 4 else "RGBA"
-                                    img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
-                                    if mode == "RGBA":
-                                        img = img.convert("RGB")
-                                    # OCR 语言配置（如 chi_sim+eng）
-                                    ocr_lang = (self.languages or "chi_sim+eng").strip()
-                                    try:
-                                        text = pytesseract.image_to_string(img, lang=ocr_lang) or ""
-                                    except Exception:
-                                        text = ""
-                        except Exception:
-                            text = text or ""
-                    if not text.strip():
-                        continue
+                    text = self._ocr_page_if_available(pdf_path, index)
+                if not text.strip():
+                    continue
                 base_meta = {
                     "source_file": pdf_path.name,
                     "file_path": str(pdf_path),
-                    "page_number": i,
-                    "layout_type": "page_text" if text else "ocr_text",
+                    "page_number": index,
+                    "layout_type": "page_text",
                     "bbox": None,
                     "source_group": source_group,
                     "document_type": document_type,
                 }
                 for sub in self._token_split(text):
                     docs.append(Document(page_content=sub, metadata=base_meta))
-
             if docs:
-                logger.info(f"回退解析完成: {pdf_path.name}, 生成基础块 {len(docs)}")
+                logger.info(f"advanced 回退解析完成: {pdf_path.name}, 生成基础块 {len(docs)}")
             else:
                 logger.warning(f"回退解析失败或为空: {pdf_path.name}")
             return docs
         except Exception as e:
             logger.error(f"回退 PDF 解析异常: {e}")
             return []
+
+    def _ocr_page_if_available(self, pdf_path: Path, page_number: int) -> str:
+        """OCR one page when optional advanced OCR dependencies are installed."""
+        try:
+            import fitz  # type: ignore
+            import pytesseract  # type: ignore
+            from PIL import Image  # type: ignore
+        except Exception as e:
+            logger.debug(f"OCR advanced 依赖不可用: {e}")
+            return ""
+
+        try:
+            tcmd = os.getenv("TESSERACT_CMD", "").strip()
+            if tcmd:
+                try:
+                    pytesseract.pytesseract.tesseract_cmd = tcmd
+                except Exception:
+                    pass
+
+            with fitz.open(str(pdf_path)) as pdf_doc:
+                if page_number - 1 >= pdf_doc.page_count:
+                    return ""
+                page = pdf_doc.load_page(page_number - 1)
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                mode = "RGB" if pix.n < 4 else "RGBA"
+                img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
+                if mode == "RGBA":
+                    img = img.convert("RGB")
+                ocr_lang = (self.languages or "chi_sim+eng").strip()
+                return pytesseract.image_to_string(img, lang=ocr_lang) or ""
+        except Exception as e:
+            logger.debug(f"OCR 回退失败: {e}")
+            return ""
