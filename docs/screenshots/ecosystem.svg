@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="640" viewBox="0 0 1180 640" role="img" aria-label="InsurIntellect ecosystem">
+  <defs>
+    <linearGradient id="top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FBFF"/></linearGradient>
+    <filter id="soft" x="-12%" y="-12%" width="124%" height="130%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0F172A" flood-opacity="0.08"/></filter>
+  </defs>
+  <rect width="1180" height="640" rx="30" fill="url(#top)"/>
+  <rect x="18" y="18" width="1144" height="604" rx="26" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <g font-family="Inter, Segoe UI, Arial, sans-serif">
+    <text x="44" y="58" font-size="25" font-weight="800" fill="#0F172A">InsurIntellect Ecosystem</text>
+    <text x="44" y="82" font-size="14" fill="#64748B">A compact insurance-clause RAG ecosystem, deliberately narrower than a financial multi-agent platform.</text>
+
+    <g filter="url(#soft)">
+      <rect x="110" y="128" width="960" height="72" rx="22" fill="#F8FAFC" stroke="#CBD5E1"/>
+      <rect x="150" y="230" width="880" height="82" rx="22" fill="#EFF6FF" stroke="#BFDBFE"/>
+      <rect x="190" y="342" width="800" height="82" rx="22" fill="#ECFDF5" stroke="#BBF7D0"/>
+      <rect x="230" y="454" width="720" height="82" rx="22" fill="#FFFBEB" stroke="#FDE68A"/>
+    </g>
+
+    <text x="590" y="173" text-anchor="middle" font-size="20" font-weight="800" fill="#0F172A">Application Layer</text>
+    <text x="590" y="194" text-anchor="middle" font-size="12.5" fill="#64748B">dual-pane UI · REST API · smoke scripts · README demo path</text>
+
+    <text x="590" y="266" text-anchor="middle" font-size="20" font-weight="800" fill="#0F172A">Clause Agent Layer</text>
+    <text x="590" y="289" text-anchor="middle" font-size="12.5" fill="#475569">query guard · evidence curator · answer protocol · refusal/advice boundary</text>
+
+    <text x="590" y="378" text-anchor="middle" font-size="20" font-weight="800" fill="#0F172A">Retrieval and DataOps Layer</text>
+    <text x="590" y="401" text-anchor="middle" font-size="12.5" fill="#475569">PDF extraction · chunk map · Chroma vectors · BM25/jieba · RRF fusion · corpus manifest</text>
+
+    <text x="590" y="490" text-anchor="middle" font-size="20" font-weight="800" fill="#0F172A">Foundation and Governance Layer</text>
+    <text x="590" y="513" text-anchor="middle" font-size="12.5" fill="#475569">OpenAI-compatible LLM · local BGE embeddings · pytest/ruff CI · not-advice disclaimer</text>
+
+    <g>
+      <circle cx="127" cy="164" r="8" fill="#64748B"/><circle cx="167" cy="271" r="8" fill="#1D9CFF"/><circle cx="207" cy="383" r="8" fill="#10B981"/><circle cx="247" cy="495" r="8" fill="#F59E0B"/>
+      <path d="M127 172 C128 210 153 230 167 263" stroke="#CBD5E1" stroke-width="3" fill="none"/>
+      <path d="M167 279 C168 318 193 340 207 375" stroke="#CBD5E1" stroke-width="3" fill="none"/>
+      <path d="M207 391 C208 428 233 452 247 487" stroke="#CBD5E1" stroke-width="3" fill="none"/>
+    </g>
+
+    <g font-size="12.5" font-weight="700">
+      <rect x="99" y="558" width="225" height="34" rx="17" fill="#F8FAFC" stroke="#E2E8F0"/>
+      <text x="212" y="580" text-anchor="middle" fill="#334155">No real customer data</text>
+      <rect x="352" y="558" width="225" height="34" rx="17" fill="#EFF6FF" stroke="#BFDBFE"/>
+      <text x="465" y="580" text-anchor="middle" fill="#1D4ED8">Retrieval before narration</text>
+      <rect x="605" y="558" width="225" height="34" rx="17" fill="#ECFDF5" stroke="#BBF7D0"/>
+      <text x="718" y="580" text-anchor="middle" fill="#047857">Citation-visible UI</text>
+      <rect x="858" y="558" width="225" height="34" rx="17" fill="#FFFBEB" stroke="#FDE68A"/>
+      <text x="971" y="580" text-anchor="middle" fill="#92400E">Advice boundary</text>
+    </g>
+  </g>
+</svg>

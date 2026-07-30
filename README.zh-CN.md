@@ -1,6 +1,4 @@
-# InsurIntellect Agent
-
-**开源保险条款智能体：本地语料、可追溯引用、诚实拒答。**
+# InsurIntellect：面向本地保险条款 PDF 应用的开源证据型 AI Agent 系统，基于大语言模型生成带引用回答
 
 [English](README.md) | [中文](README.zh-CN.md)
 
@@ -11,11 +9,10 @@
 [![Last commit](https://img.shields.io/github/last-commit/Phoenix0531-sudo/InsurIntellect-Agent/master)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/commits/master)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](#快速开始)
-
-<!-- 产品 / 栈（诚实静态 — 不造假 PyPI / Discord / Downloads） -->
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 [![Chroma](https://img.shields.io/badge/vector-Chroma-FF6F61.svg)](https://www.trychroma.com/)
 [![BM25](https://img.shields.io/badge/lexical-BM25%2Bjieba-6C63FF.svg)](#架构)
+[![RAG](https://img.shields.io/badge/RAG-clause--grounded-1D9CFF.svg)](#条款证据型-rag-的概念)
 [![Embedding](https://img.shields.io/badge/embed-BGE%20small%20zh-orange.svg)](#提供商说明)
 [![Threshold](https://img.shields.io/badge/SIMILARITY__THRESHOLD-0.32-informational.svg)](#提供商说明)
 [![Port](https://img.shields.io/badge/demo-localhost%3A8766-0ea5e9.svg)](#快速开始)
@@ -25,48 +22,30 @@
 
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
-<p align="center">
-  <img src="docs/screenshots/logo.png" alt="InsurIntellect 标识" width="72" />
-</p>
+<div align="center">
+  <img align="center" src="docs/screenshots/readme_logo.svg" width="52%" alt="InsurIntellect 白底标识"/>
+</div>
 
-<p align="center">
-  <img src="docs/screenshots/hero.png" alt="InsurIntellect 主视觉 — 双栏条款 RAG" width="92%" />
-</p>
-<p align="center"><sub>主视觉来自真实双栏会话（右栏引用、左栏条款 PDF / 证据条）。</sub></p>
+**InsurIntellect** 是面向保险条款 / 保单 PDF 的 AI Agent 系统。它构建本地条款语料库，用向量 + BM25 检索定位证据，再由 OpenAI 兼容大语言模型只负责把可追溯证据组织成回答。
 
-<details>
-<summary><strong>四态界面</strong>（主界面 · 引用 · 拒答/建议 · 空态）</summary>
-<p align="center">
-  <img src="docs/screenshots/preview.png" alt="主界面双栏" width="48%" />
-  <img src="docs/screenshots/citations.png" alt="引用卡" width="48%" />
-</p>
-<p align="center">
-  <img src="docs/screenshots/refuse_advice.png" alt="拒答 / 建议边界" width="48%" />
-  <img src="docs/screenshots/preview_empty.png" alt="冷启动 / 空态" width="48%" />
-</p>
-</details>
+**条款证据型 RAG 的概念：** 条款语料是环境，混合检索是工具层，语言模型是叙述层。它不是通用保险聊天机器人，不从模型记忆回答，也不扮演持牌保险顾问；只有当已入库条款能支撑答案时才回答，证据不足或触及监管边界时拒答。
 
-InsurIntellect 是面向作品集的 **金融垂直智能体演示**：对保险条款 / 保单类 PDF 做本地问答。
-
-- 索引本地条款语料
-- 混合检索（向量 + BM25）
-- 只基于 **可追溯引用** 作答
-- 对购保建议、保证理赔、离题问题 **拒答 / 强边界**
-
-它 **不是** 多租户 SaaS，**不是** Agent 画布平台，**不构成受监管保险建议（Not regulated insurance advice）**。
-
-产品叙事对齐金融智能体同侪 [FinRobot](https://github.com/AI4Finance-Foundation/FinRobot)（智能体 + 证据溯源）。证据 UI 采用轻量 RAGFlow 式「知识库 + 引用」布局。免责语气参考 [FinGPT](https://github.com/AI4Finance-Foundation/FinGPT)。
+本仓库刻意保持紧凑：它是保险条款版轻量 RAGFlow 主路径，不是多租户 SaaS，不是通用 ChatGPT 顾问，也不是 Agent 画布平台。
 
 ---
 
 ## 目录
 
-- [为什么做 InsurIntellect](#为什么做-insurintellect)
-- [设计原则](#设计原则)
-- [预览](#预览)
+- [InsurIntellect 是什么？](#insurintellect-是什么)
+- [条款证据型 RAG 的概念](#条款证据型-rag-的概念)
 - [架构](#架构)
+- [条款检索，LLM 叙述](#条款检索llm-叙述)
+- [代码库快照](#代码库快照)
+- [InsurIntellect 生态](#insurintellect-生态)
+- [InsurIntellect：Agent 工作流](#insurintellectagent-工作流)
+- [InsurIntellect：智能检索调度](#insurintellect智能检索调度)
+- [预览](#预览)
 - [核心能力](#核心能力)
-- [技术栈](#技术栈)
 - [快速开始](#快速开始)
 - [固定演示问题](#固定演示问题)
 - [API](#api)
@@ -80,33 +59,122 @@ InsurIntellect 是面向作品集的 **金融垂直智能体演示**：对保险
 
 ---
 
-## 为什么做 InsurIntellect
+## InsurIntellect 是什么？
 
-1. **保险文本高风险。** 通用聊天会编造等待期与责任免除。本演示 **用检索门闩约束回答**，有答则展示 **文档 / 页码 / 摘录**。
-2. **溯源优先于花活。** 对齐 FinRobot「数字由代码算、叙述由 LLM 写」：这里是 **条款由检索给出、叙述由 LLM 辅助、证据不足就拒答**。
-3. **作品集诚实范围。** 只做一条垂直主路径（本地 PDF → hybrid 检索 → 带引用回答 / 拒答）。不做假多租户 SaaS，不做股权研究多 Agent 套壳，不做「保证获赔」机器人。
+InsurIntellect 是一个面向本地保险文档的条款证据型金融 AI Agent。它只聚焦一条可复现流程：
+
+```text
+本地条款 PDF → 混合检索 → 证据门闩 → 带引用回答或拒答
+```
+
+项目按作品集审阅方式设计：样例语料公开合成，API 足够小，UI 把证据放在一等位置，CI 不依赖真实 LLM Key。
+
+## 条款证据型 RAG 的概念
+
+保险条款文本风险很高。等待期、责任免除、免赔额、犹豫期等内容应该来自保单原文，而不是由聊天模型猜测。InsurIntellect 因此把已入库语料视为事实源，只有检索成功后才让 LLM 组织叙述。
+
+1. **条款语料优先。** 回答必须来自已索引 PDF，而不是模型记忆。
+2. **溯源优先于流畅。** 有据回答必须展示文档 / 页码 / 摘录。
+3. **边界也是产品功能。** 购保建议、保证获赔、离题问题直接拒答，而不是包装成泛泛聊天。
 4. **可复现演示。** 公开合成样例、`run_demo` 强制 BGE + 阈值、固定 smoke（Q1/Q2/Q3/天气）、CI 不依赖在线 LLM Key。
 
 ---
 
-## 设计原则
+## 架构
 
-核心是 **检索证据** 与 **LLM 叙述** 严格分离：
+<div align="center">
+  <img align="center" src="docs/screenshots/architecture.svg" width="94%" alt="InsurIntellect 架构"/>
+</div>
+
+InsurIntellect 只把一条主路径放在用户面前：
 
 ```text
-条款来自已入库语料的检索。
-叙述由 LLM 辅助生成（OpenAI 兼容网关）。
-每条回答要么带引用，要么拒答。
+samples/*.pdf
+  → simple_ingest.py
+  → Chroma 向量 + BM25/jieba + corpus_manifest
+  → POST /api/v1/queries/ask
+  → answer_kind + retrieved_chunks[]
+  → 双栏证据 UI
 ```
 
-| 层 | 做什么 | 不做什么 |
-|----|--------|----------|
-| **语料 / 入库** | PDF 切块、嵌入、BM25 + Chroma | 编造条款原文 |
-| **检索** | Hybrid top-k、分数门闩 | 保证理赔结果 |
-| **生成** | 结论 / 依据 / 边界 + `[1][2]` | 给出购买或核保建议 |
-| **对外引用** | 有据回答展示真实得分 chunk | 拒答 / 建议类不展示填充引用 |
+默认 **`SIMPLE_RAG_MODE=true`**：retrieve → generate。
 
-证据不足、离题、或用户索取受监管建议时：返回 **拒答 / 边界**，并保持 **对外 citations 为空**。
+默认关闭（仅 advanced 可选）：查询重写、SQL 路由、知识图谱注入、监管多 Agent 长链。
+
+## 条款检索，LLM 叙述
+
+InsurIntellect 的核心设计原则是严格区分 **检索得到的条款证据** 与 **LLM 生成的叙述**。
+
+保单事实由确定性代码路径给出：PDF 文本抽取、切块、嵌入、BM25、向量检索、RRF 融合和分数门闩。LLM 只在这些证据路径返回可用条款后，用于综合、措辞和结构化表达。
+
+简言之：
+
+```text
+条款由检索提供依据。
+叙述由 LLM 辅助组织。
+每个输出要么带引用，要么拒答。
+```
+
+### 回答类型 `answer_kind`
+
+| 值 | 含义 | 对外 `retrieved_chunks` |
+|----|------|-------------------------|
+| `answer` | 有据条款问答 | 真实得分引用 |
+| `refusal` | 离题 / 证据不足 | 空 |
+| `advice` | 购买 / 保证理赔 /「该不该买」 | 空 |
+| `llm_unavailable` | 无 Key 或 LLM 失败；检索仍可进行 | 诚实降级策略 |
+| `degraded` | 超时 / 部分路径 | 尽力返回 + 诚实文案 |
+
+---
+
+## 代码库快照
+
+| 层 | 包含内容 |
+|----|----------|
+| **条款语料** | 公开合成样例 PDF 与生成脚本；不包含真实客户保单 |
+| **入库流水线** | `scripts/generate_sample_corpus.py`、`scripts/simple_ingest.py`、Chroma 向量、BM25/jieba、语料 manifest |
+| **检索运行时** | `QueryService`、`rag_workflow`、RRF 融合、BGE 阈值门闩、对外引用整理 |
+| **回答协议** | `answer_kind`、`retrieved_chunks[]`、`public_citations`、结论 / 依据 / 边界结构 |
+| **LLM 适配** | OpenAI 兼容客户端；无 Key 与超时均走诚实降级 |
+| **产品 UI** | 静态 ChatPDF 式双栏：左侧语料 / 被引用 PDF，右侧回答 / 引用卡 |
+| **验证** | `demo_smoke.py`、`empty_index_smoke.py`、pytest、ruff critical、GitHub Actions |
+
+---
+
+## InsurIntellect 生态
+
+<div align="center">
+  <img align="center" src="docs/screenshots/ecosystem.svg" width="94%" alt="InsurIntellect 生态"/>
+</div>
+
+整体框架分为四层：
+
+1. **应用层：** 双栏 UI、REST API、smoke 脚本和 README 演示主路径。
+2. **条款 Agent 层：** 查询门闩、证据整理、回答协议、拒答 / 建议边界。
+3. **检索与 DataOps 层：** PDF 抽取、chunk map、Chroma 向量、BM25/jieba、RRF 融合、语料 manifest。
+4. **基础与治理层：** OpenAI 兼容 LLM、本地 BGE 嵌入、pytest/ruff CI、不构成建议的免责声明。
+
+## InsurIntellect：Agent 工作流
+
+<div align="center">
+  <img align="center" src="docs/screenshots/workflow.svg" width="94%" alt="InsurIntellect Agent 工作流"/>
+</div>
+
+1. **感知：** 接收用户问题，并识别空问题、离题、购保建议或保证理赔类请求。
+2. **检索：** 用向量 + BM25 检索本地条款语料，并通过 RRF 融合排序。
+3. **证据门闩：** 整理引用、按文档 / 页码去重，分数不足时停止生成。
+4. **叙述：** LLM 只负责组织结论、条款依据与不确定 / 边界说明。
+5. **行动：** 返回稳定 API 响应，并在 UI 中渲染引用卡。
+
+## InsurIntellect：智能检索调度
+
+<div align="center">
+  <img align="center" src="docs/screenshots/schedule.svg" width="94%" alt="InsurIntellect 智能检索调度"/>
+</div>
+
+调度刻意保持简单。入库阶段把文档转换为带页码的 chunks、向量、BM25 索引和 corpus manifest；提问阶段验证问题、检索 top-k 证据、整理引用，然后选择 LLM 叙述或诚实拒答。
+
+这是保险条款场景里的 smart scheduler：它根据证据质量在检索、拒答和 LLM 叙述之间选择，而不是引入沉重的多 Agent 平台。
 
 ---
 
@@ -121,73 +189,26 @@ InsurIntellect 是面向作品集的 **金融垂直智能体演示**：对保险
 | 拒答 / 建议边界 | [docs/screenshots/refuse_advice.png](docs/screenshots/refuse_advice.png) |
 | 冷启动 / 空态 | [docs/screenshots/preview_empty.png](docs/screenshots/preview_empty.png) |
 
-左栏：产品名、已索引文档、示例问题、免责。  
-右栏：对话、结构化答案、引用卡（文档名 / 页码 / 摘录）。  
+左栏：产品名、已索引文档、示例问题、免责。<br>
+右栏：对话、结构化答案、引用卡（文档名 / 页码 / 摘录）。<br>
 UI 壳为静态 HTML/CSS/JS（ChatPDF 式双栏，主色 `#1D9CFF`）；产品故事是保险条款 RAG，不是通用 PDF Chat。
-
----
-
-## 架构
-
-```text
-samples/*.pdf  ──生成──►  data/documents/pdfs
-        │
-        ▼
- simple_ingest.py
-   → Chroma（向量）+ BM25/jieba + corpus_manifest
-        │
-        ▼
- POST /api/v1/queries/ask
-   hybrid 检索 top-k
-   → 门闩：低分 / 离题 / 购保建议  →  拒答（citations 为空）
-   → 否则 LLM 结构化回答 + [1][2] + public_citations
-        │
-        ▼
- static/ UI  ·  默认浅色  ·  引用一等公民
-```
-
-默认 **`SIMPLE_RAG_MODE=true`**：retrieve → generate。
-
-默认关闭（仅 advanced 可选）：查询重写、SQL 路由、知识图谱注入、监管多 Agent 长链。
-
-### 回答类型 `answer_kind`
-
-| 值 | 含义 | 对外 `retrieved_chunks` |
-|----|------|-------------------------|
-| `answer` | 有据条款问答 | 真实得分引用 |
-| `refusal` | 离题 / 证据不足 | 空 |
-| `advice` | 购买 / 保证理赔 /「该不该买」 | 空 |
-| `llm_unavailable` | 无 Key 或 LLM 失败；检索仍可进行 | 诚实降级策略 |
-| `degraded` | 超时 / 部分路径 | 尽力返回 + 诚实文案 |
 
 ---
 
 ## 核心能力
 
+核心能力包括：
+
 | 能力 | 说明 |
 |------|------|
 | 条款语料优先 | 仓库仅公开假样例 PDF，不提交真实客户保单 |
 | 混合检索 | Chroma + BM25/jieba；默认嵌入 `hf:BAAI/bge-small-zh-v1.5` |
-| 分数门闩 | BGE 下 `SIMILARITY_THRESHOLD=0.32`（demo 脚本强制） |
+| 分数门闩 | BGE 下 `SIMILARITY_THRESHOLD=0.32`；demo 脚本强制入库 / 查询一致 |
 | 带引用回答 | 结论 / 条款依据 / 边界 + 一行免责 |
 | 诚实拒答 | 天气、购保建议、「保证获赔」→ 边界，不当闲聊 |
 | 对外引用策略 | answer 保留真实得分；refuse/advice → `[]` |
 | 证据 UI | 双栏、引用卡、可点 `[n]`、状态 pill |
-| 本地优先 | `uv` + **127.0.0.1:8766**；OpenAI 兼容网关 |
-
----
-
-## 技术栈
-
-| 层 | 选型 |
-|----|------|
-| API | FastAPI + Uvicorn |
-| 检索 | Chroma + BM25/jieba hybrid |
-| 嵌入 | 本机 HF `BAAI/bge-small-zh-v1.5`（或离线 `local:hash`） |
-| LLM | OpenAI 兼容（`OPENAI_BASE_URL`） |
-| UI | 静态 HTML / CSS / JS（`static/js/app.js`） |
-| 测试 | pytest + ruff critical（CI） |
-| 演示 | `scripts/run_demo.sh` / `.bat` + `demo_smoke.py` |
+| 本地优先 | `uv` + **[IP]:8766**；OpenAI 兼容网关 |
 
 ---
 

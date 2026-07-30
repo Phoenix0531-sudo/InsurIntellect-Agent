@@ -1,6 +1,4 @@
-# InsurIntellect Agent
-
-**An open-source insurance-clause AI agent for local, evidence-grounded Q&A.**
+# InsurIntellect: An Open-Source Insurance-Clause AI Agent for Local Policy PDF Applications using Large Language Models
 
 [English](README.md) | [中文](README.zh-CN.md)
 
@@ -11,11 +9,10 @@
 [![Last commit](https://img.shields.io/github/last-commit/Phoenix0531-sudo/InsurIntellect-Agent/master)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/commits/master)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](#quickstart)
-
-<!-- Product / stack (honest static — no fake PyPI / Discord / Downloads) -->
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 [![Chroma](https://img.shields.io/badge/vector-Chroma-FF6F61.svg)](https://www.trychroma.com/)
 [![BM25](https://img.shields.io/badge/lexical-BM25%2Bjieba-6C63FF.svg)](#architecture)
+[![RAG](https://img.shields.io/badge/RAG-clause--grounded-1D9CFF.svg)](#concept-of-clause-grounded-rag)
 [![Embedding](https://img.shields.io/badge/embed-BGE%20small%20zh-orange.svg)](#provider-notes)
 [![Threshold](https://img.shields.io/badge/SIMILARITY__THRESHOLD-0.32-informational.svg)](#provider-notes)
 [![Port](https://img.shields.io/badge/demo-localhost%3A8766-0ea5e9.svg)](#quickstart)
@@ -25,48 +22,30 @@
 
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
-<p align="center">
-  <img src="docs/screenshots/logo.png" alt="InsurIntellect mark" width="72" />
-</p>
+<div align="center">
+  <img align="center" src="docs/screenshots/readme_logo.svg" width="52%" alt="InsurIntellect white-background logo"/>
+</div>
 
-<p align="center">
-  <img src="docs/screenshots/hero.png" alt="InsurIntellect hero — dual-pane clause RAG" width="92%" />
-</p>
-<p align="center"><sub>Hero from a live dual-pane session (citations on the right, clause PDF / evidence on the left).</sub></p>
+**InsurIntellect** is an AI agent system tailored for insurance policy and clause PDFs. It builds a local clause corpus, retrieves evidence with vector + BM25 search, and uses an OpenAI-compatible large language model only to narrate answers that can be traced back to document, page, and excerpt.
 
-<details>
-<summary><strong>Four UI states</strong> (main · citations · refuse/advice · empty)</summary>
-<p align="center">
-  <img src="docs/screenshots/preview.png" alt="Main dual-pane UI" width="48%" />
-  <img src="docs/screenshots/citations.png" alt="Citation cards" width="48%" />
-</p>
-<p align="center">
-  <img src="docs/screenshots/refuse_advice.png" alt="Refuse / advice boundary" width="48%" />
-  <img src="docs/screenshots/preview_empty.png" alt="Empty / cold start" width="48%" />
-</p>
-</details>
+**Concept of Clause-Grounded RAG:** clauses are the environment, hybrid retrieval is the tool layer, and the language model is the narrator. Unlike a general insurance chatbot, InsurIntellect does not answer from model memory and does not act as a licensed insurance advisor. It answers when indexed wording supports the response, and refuses when evidence or regulatory boundary is missing.
 
-InsurIntellect is a **portfolio-ready financial agent demo** for insurance policy / clause PDFs:
-
-- Index a local clause corpus
-- Hybrid retrieve (vector + BM25)
-- Answer only with **traceable citations**
-- **Refuse** purchase advice, guarantee claims, and off-topic questions
-
-It is **not** a multi-tenant SaaS, **not** an agent canvas platform, and **not regulated insurance advice**.
-
-Product narrative is aligned with financial-agent peers such as [FinRobot](https://github.com/AI4Finance-Foundation/FinRobot) (agent + provenance). Evidence UI follows a lightweight RAGFlow-style knowledge-base + citations layout. Disclaimer tone draws from [FinGPT](https://github.com/AI4Finance-Foundation/FinGPT).
+This repository keeps the product intentionally compact: a lightweight RAGFlow-style path for insurance clauses, not a multi-tenant SaaS, not a generic ChatGPT advisor, and not an agent canvas platform.
 
 ---
 
 ## Table of contents
 
-- [Why InsurIntellect](#why-insurintellect)
-- [Design principle](#design-principle)
-- [Preview](#preview)
+- [What is InsurIntellect?](#what-is-insurintellect)
+- [Concept of clause-grounded RAG](#concept-of-clause-grounded-rag)
 - [Architecture](#architecture)
+- [Retrieved clauses, LLM narration](#retrieved-clauses-llm-narration)
+- [Codebase snapshot](#codebase-snapshot)
+- [InsurIntellect ecosystem](#insurintellect-ecosystem)
+- [InsurIntellect: Agent workflow](#insurintellect-agent-workflow)
+- [InsurIntellect: Smart retrieval schedule](#insurintellect-smart-retrieval-schedule)
+- [Preview](#preview)
 - [Core capabilities](#core-capabilities)
-- [Tech stack](#tech-stack)
 - [Quickstart](#quickstart)
 - [Demo questions](#demo-questions)
 - [API](#api)
@@ -80,33 +59,122 @@ Product narrative is aligned with financial-agent peers such as [FinRobot](https
 
 ---
 
-## Why InsurIntellect
+## What is InsurIntellect?
 
-1. **Insurance text is high-stakes.** Generic chatbots invent waiting periods and exclusions. This demo **gates answers on retrieval** and shows **document / page / excerpt** when it answers.
-2. **Provenance over polish.** Like FinRobot’s “numbers are code-calculated; narratives are LLM-assisted,” here **clauses are retrieved; narration is LLM-assisted; refuse when evidence is weak**.
-3. **Portfolio-honest scope.** One vertical path (local PDF → hybrid retrieve → cited answer / refuse). No fake multi-tenant SaaS, no equity multi-agent cosplay, no “guaranteed payout” bot.
+InsurIntellect is a clause-grounded financial AI agent for local insurance documents. It focuses on one repeatable workflow:
+
+```text
+Local clause PDFs → hybrid retrieval → evidence gate → cited answer or refusal
+```
+
+The project is designed for portfolio review: the sample corpus is synthetic and public, the API is small, the UI shows evidence as first-class content, and CI can run without a live LLM key.
+
+## Concept of clause-grounded RAG
+
+Insurance wording is high-stakes. Waiting periods, exclusions, deductibles, and free-look terms should be read from the policy text, not guessed by a chatbot. InsurIntellect therefore treats the indexed corpus as the source of truth and uses the LLM only after retrieval succeeds.
+
+1. **Clause corpus first.** The answer must come from indexed PDFs, not model memory.
+2. **Provenance over fluency.** Every grounded answer exposes document / page / excerpt citations.
+3. **Boundary as a product feature.** Purchase advice, guaranteed payout claims, and off-topic questions are refused instead of softened into generic chat.
 4. **Reproducible demo.** Public synthetic samples, forced BGE + threshold in `run_demo`, fixed smoke cases (Q1/Q2/Q3/weather), CI without live LLM keys.
 
 ---
 
-## Design principle
+## Architecture
 
-A core design choice of InsurIntellect is the strict separation between **retrieval evidence** and **LLM narration**:
+<div align="center">
+  <img align="center" src="docs/screenshots/architecture.svg" width="94%" alt="InsurIntellect architecture"/>
+</div>
+
+InsurIntellect keeps one main path in front of the user:
 
 ```text
-Clauses are retrieved from the indexed corpus.
-Narratives are LLM-assisted (OpenAI-compatible).
-Every answer is citation-tracked — or refused.
+samples/*.pdf
+  → simple_ingest.py
+  → Chroma vectors + BM25/jieba + corpus_manifest
+  → POST /api/v1/queries/ask
+  → answer_kind + retrieved_chunks[]
+  → dual-pane evidence UI
 ```
 
-| Layer | What it does | What it does not do |
-|-------|----------------|---------------------|
-| **Corpus / ingest** | Chunk PDFs, embed, build BM25 + Chroma | Invent policy text |
-| **Retrieve** | Hybrid top-k, score gate | Guarantee claim outcomes |
-| **Answer** | Structure conclusion / basis / boundary with `[1][2]` | Give purchase or underwriting advice |
-| **Public citations** | Show real scored chunks for grounded answers | Expose filler / zero-score sources on refuse & advice |
+Default path is **`SIMPLE_RAG_MODE=true`**: retrieve → generate.
 
-When evidence is weak, missing, or the user asks for regulated advice, the system returns a **refusal / boundary** response and keeps **public citations empty**.
+Off by default (advanced / optional code only): query rewriting, SQL routing, knowledge-graph injection, regulatory multi-agent chains.
+
+## Retrieved clauses, LLM narration
+
+A core design principle of InsurIntellect is the strict separation between **retrieved clause evidence** and **LLM-based narration**.
+
+Policy facts are retrieved from the local corpus through deterministic code paths: PDF text extraction, chunking, embeddings, BM25, vector search, reciprocal-rank fusion, and a score gate. The LLM is used for synthesis, wording, and structure only after those evidence paths return usable clauses.
+
+In short:
+
+```text
+Clauses are retrieval-grounded.
+Narration is LLM-assisted.
+Every output is citation-tracked or refused.
+```
+
+### Answer kinds
+
+| `answer_kind` | Meaning | Public `retrieved_chunks` |
+|---------------|---------|---------------------------|
+| `answer` | Grounded clause Q&A | Real scored citations |
+| `refusal` | Off-topic / insufficient evidence | Empty |
+| `advice` | Purchase / guarantee / “should I buy” style | Empty |
+| `llm_unavailable` | No key or LLM failure; retrieval may still run | Policy-dependent honest degrade |
+| `degraded` | Timeout / partial path | Best-effort, honest copy |
+
+---
+
+## Codebase snapshot
+
+| Layer | What it includes |
+|-------|------------------|
+| **Clause corpus** | Synthetic public sample PDFs plus generator; no real customer policies |
+| **Ingest pipeline** | `scripts/generate_sample_corpus.py`, `scripts/simple_ingest.py`, Chroma vectors, BM25/jieba, corpus manifest |
+| **Retrieval runtime** | `QueryService`, `rag_workflow`, RRF fusion, BGE threshold gate, public citation curation |
+| **Answer protocol** | `answer_kind`, `retrieved_chunks[]`, `public_citations`, structured conclusion / basis / boundary copy |
+| **LLM adaptor** | OpenAI-compatible client with no-key and timeout degrade paths |
+| **Product UI** | Static ChatPDF-style dual pane: corpus/cited PDF on the left, answer/citations on the right |
+| **Verification** | `demo_smoke.py`, `empty_index_smoke.py`, pytest, ruff critical rules, GitHub Actions |
+
+---
+
+## InsurIntellect ecosystem
+
+<div align="center">
+  <img align="center" src="docs/screenshots/ecosystem.svg" width="94%" alt="InsurIntellect ecosystem"/>
+</div>
+
+The overall framework is organized into four layers:
+
+1. **Application layer:** dual-pane UI, REST API, smoke scripts, and the README demo path.
+2. **Clause agent layer:** query guard, evidence curator, answer protocol, and refusal/advice boundary.
+3. **Retrieval and DataOps layer:** PDF extraction, chunk map, Chroma vectors, BM25/jieba, RRF fusion, and corpus manifest.
+4. **Foundation and governance layer:** OpenAI-compatible LLM, local BGE embeddings, pytest/ruff CI, and the not-advice disclaimer.
+
+## InsurIntellect: Agent workflow
+
+<div align="center">
+  <img align="center" src="docs/screenshots/workflow.svg" width="94%" alt="InsurIntellect agent workflow"/>
+</div>
+
+1. **Perception:** receive the user question and classify empty, off-topic, purchase-advice, or guarantee-style requests.
+2. **Retrieval:** search the local clause corpus with vector + BM25 retrieval and reciprocal-rank fusion.
+3. **Evidence gate:** curate citations, deduplicate document/page hits, and stop if scores are too weak.
+4. **Narration:** use the LLM only to organize conclusion, clause basis, and uncertainty/boundary text.
+5. **Action:** return a stable API response and render citation cards in the UI.
+
+## InsurIntellect: Smart retrieval schedule
+
+<div align="center">
+  <img align="center" src="docs/screenshots/schedule.svg" width="94%" alt="InsurIntellect smart retrieval schedule"/>
+</div>
+
+The schedule is intentionally simple. At ingest-time, documents are converted into page-aware chunks, vectors, lexical BM25 indexes, and a corpus manifest. At ask-time, the service validates the question, retrieves top-k evidence, curates citations, and either narrates with the LLM or refuses honestly.
+
+This is the insurance-clause analogue of a smart scheduler: it selects between retrieval, refusal, and LLM narration based on evidence quality instead of routing into a heavy multi-agent platform.
 
 ---
 
@@ -116,80 +184,31 @@ When evidence is weak, missing, or the user asks for regulated advice, the syste
 
 | View | File |
 |------|------|
-| Hero banner | [docs/screenshots/hero.png](docs/screenshots/hero.png) |
-| Logo mark | [docs/screenshots/logo.png](docs/screenshots/logo.png) |
 | Main two-pane UI | [docs/screenshots/preview.png](docs/screenshots/preview.png) |
 | Citation cards | [docs/screenshots/citations.png](docs/screenshots/citations.png) |
 | Refuse / advice boundary | [docs/screenshots/refuse_advice.png](docs/screenshots/refuse_advice.png) |
 | Empty / cold start | [docs/screenshots/preview_empty.png](docs/screenshots/preview_empty.png) |
 
-Left pane: product name, indexed documents, demo prompts, disclaimer.  
-Right pane: dialogue, structured answer, citation cards (document / page / excerpt).  
+Left pane: product name, indexed documents, demo prompts, disclaimer.<br>
+Right pane: dialogue, structured answer, citation cards (document / page / excerpt).<br>
 UI shell is static HTML/CSS/JS (ChatPDF-like dual pane, accent `#1D9CFF`); product story is financial clause RAG, not generic PDF chat.
-
----
-
-## Architecture
-
-```text
-samples/*.pdf  ──generate──►  data/documents/pdfs
-        │
-        ▼
- simple_ingest.py
-   → Chroma (vectors) + BM25/jieba + corpus_manifest
-        │
-        ▼
- POST /api/v1/queries/ask
-   hybrid retrieve top-k
-   → gate: weak / off-topic / advice  →  refusal (citations empty)
-   → else LLM structured answer with [1][2] + public_citations
-        │
-        ▼
- static/ UI  ·  light theme  ·  sources first-class
-```
-
-Default path is **`SIMPLE_RAG_MODE=true`**: retrieve → generate.
-
-Off by default (advanced / optional code only): query rewriting, SQL routing, knowledge-graph injection, regulatory multi-agent chains.
-
-### Answer kinds
-
-| `answer_kind` | Meaning | Public `retrieved_chunks` |
-|---------------|---------|---------------------------|
-| `answer` | Grounded clause Q&A | Real scored citations |
-| `refusal` | Off-topic / insufficient evidence | Empty |
-| `advice` | Purchase / guarantee / “should I buy” style | Empty |
-| `llm_unavailable` | No key or LLM failure; retrieval may still run | Policy-dependent (honest degrade) |
-| `degraded` | Timeout / partial path | Best-effort, honest copy |
 
 ---
 
 ## Core capabilities
 
+Key capabilities include:
+
 | Capability | Detail |
 |------------|--------|
 | Clause corpus first | Public fake sample PDFs only; no real customer policies in-repo |
 | Hybrid retrieval | Chroma + BM25/jieba; default embed `hf:BAAI/bge-small-zh-v1.5` |
-| Score gate | `SIMILARITY_THRESHOLD=0.32` for BGE (demo scripts force this) |
+| Score gate | `SIMILARITY_THRESHOLD=0.32` for BGE; demo scripts force ingest/query consistency |
 | Cited answers | Conclusion / clause basis / boundary + disclaimer line |
 | Honest refuse | Weather, purchase advice, “guaranteed payout” → boundary, not free chat |
 | Public citation policy | Answer keeps real scores; refuse/advice → `[]` |
 | Evidence UI | Dual pane, citation cards, clickable `[n]`, status pill |
-| Local-first | `uv` + **127.0.0.1:8766**; OpenAI-compatible gateway |
-
----
-
-## Tech stack
-
-| Layer | Choice |
-|-------|--------|
-| API | FastAPI + Uvicorn |
-| Retrieve | Chroma + BM25/jieba hybrid |
-| Embed | Local HF `BAAI/bge-small-zh-v1.5` (or `local:hash` offline) |
-| LLM | OpenAI-compatible (`OPENAI_BASE_URL`) |
-| UI | Static HTML / CSS / JS (`static/js/app.js`) |
-| Tests | pytest + ruff critical rules (CI) |
-| Demo | `scripts/run_demo.sh` / `.bat` + `demo_smoke.py` (+ optional `empty_index_smoke.py`) |
+| Local-first | `uv` + **[IP]:8766**; OpenAI-compatible gateway |
 
 ---
 

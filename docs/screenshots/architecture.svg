@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="560" viewBox="0 0 1180 560" role="img" aria-label="InsurIntellect architecture">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FBFF"/></linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EAF5FF"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ECFDF5"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFBEB"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#64748B"/></marker>
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0F172A" flood-opacity="0.08"/></filter>
+  </defs>
+  <rect width="1180" height="560" rx="30" fill="url(#bg)"/>
+  <rect x="18" y="18" width="1144" height="524" rx="26" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <g font-family="Inter, Segoe UI, Arial, sans-serif">
+    <text x="44" y="58" font-size="25" font-weight="800" fill="#0F172A">InsurIntellect Architecture</text>
+    <text x="44" y="82" font-size="14" fill="#64748B">A narrow clause-RAG main path: local PDF corpus, deterministic retrieval, LLM narration, cited UI.</text>
+
+    <g filter="url(#soft)">
+      <rect x="54" y="125" width="190" height="118" rx="22" fill="url(#blue)" stroke="#BFDBFE"/>
+      <rect x="272" y="125" width="190" height="118" rx="22" fill="url(#blue)" stroke="#BFDBFE"/>
+      <rect x="490" y="125" width="190" height="118" rx="22" fill="url(#blue)" stroke="#BFDBFE"/>
+      <rect x="708" y="125" width="190" height="118" rx="22" fill="url(#green)" stroke="#BBF7D0"/>
+      <rect x="926" y="125" width="190" height="118" rx="22" fill="url(#green)" stroke="#BBF7D0"/>
+    </g>
+
+    <g text-anchor="middle">
+      <text x="149" y="160" font-size="18" font-weight="800" fill="#0F172A">Public samples</text>
+      <text x="149" y="184" font-size="12.5" fill="#475569">synthetic policy clauses</text>
+      <text x="149" y="205" font-size="12.5" fill="#475569">waiting · exclusions · free-look</text>
+
+      <text x="367" y="160" font-size="18" font-weight="800" fill="#0F172A">Ingest pipeline</text>
+      <text x="367" y="184" font-size="12.5" fill="#475569">parse PDF · chunk pages</text>
+      <text x="367" y="205" font-size="12.5" fill="#475569">embed · BM25 · manifest</text>
+
+      <text x="585" y="160" font-size="18" font-weight="800" fill="#0F172A">Hybrid retrieve</text>
+      <text x="585" y="184" font-size="12.5" fill="#475569">Chroma + BM25 + RRF</text>
+      <text x="585" y="205" font-size="12.5" fill="#475569">BGE threshold gate</text>
+
+      <text x="803" y="160" font-size="18" font-weight="800" fill="#0F172A">Answer protocol</text>
+      <text x="803" y="184" font-size="12.5" fill="#475569">answer_kind + citations</text>
+      <text x="803" y="205" font-size="12.5" fill="#475569">conclusion · basis · boundary</text>
+
+      <text x="1021" y="160" font-size="18" font-weight="800" fill="#0F172A">Evidence UI</text>
+      <text x="1021" y="184" font-size="12.5" fill="#475569">PDF left · chat right</text>
+      <text x="1021" y="205" font-size="12.5" fill="#475569">cards follow [n]</text>
+    </g>
+
+    <g stroke="#64748B" stroke-width="3" marker-end="url(#arrow)">
+      <line x1="244" y1="184" x2="272" y2="184"/>
+      <line x1="462" y1="184" x2="490" y2="184"/>
+      <line x1="680" y1="184" x2="708" y2="184"/>
+      <line x1="898" y1="184" x2="926" y2="184"/>
+    </g>
+
+    <rect x="80" y="306" width="1020" height="136" rx="24" fill="#F8FAFC" stroke="#E2E8F0"/>
+    <text x="110" y="340" font-size="17" font-weight="800" fill="#0F172A">Main runtime contract</text>
+    <text x="110" y="369" font-size="13.5" fill="#334155">POST /api/v1/queries/ask → validate question → retrieve top-k → curate citations → generate or refuse → return answer_kind + retrieved_chunks[]</text>
+    <line x1="110" y1="392" x2="1065" y2="392" stroke="#E2E8F0"/>
+    <g font-size="12.5" fill="#475569">
+      <text x="110" y="420">Default: SIMPLE_RAG_MODE=true</text>
+      <text x="350" y="420">Advanced off by default: routing, SQL, KG, multi-agent review</text>
+      <text x="765" y="420">No-key path: honest LLM unavailable degrade</text>
+    </g>
+
+    <rect x="80" y="466" width="322" height="34" rx="17" fill="#EFF6FF" stroke="#BFDBFE"/>
+    <text x="241" y="488" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1D4ED8">Local-first demo: uv + localhost:8766</text>
+    <rect x="429" y="466" width="322" height="34" rx="17" fill="#ECFDF5" stroke="#BBF7D0"/>
+    <text x="590" y="488" text-anchor="middle" font-size="12.5" font-weight="700" fill="#047857">Citations visible in API and UI</text>
+    <rect x="778" y="466" width="322" height="34" rx="17" fill="#FFFBEB" stroke="#FDE68A"/>
+    <text x="939" y="488" text-anchor="middle" font-size="12.5" font-weight="700" fill="#92400E">Not regulated insurance advice</text>
+  </g>
+</svg>
