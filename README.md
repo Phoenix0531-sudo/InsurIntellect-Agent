@@ -23,7 +23,7 @@
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
 <div align="center">
-  <img align="center" src="docs/screenshots/readme_logo.svg" width="42%" alt="InsurIntellect white-background mascot logo"/>
+  <img align="center" src="docs/screenshots/readme_logo.svg" width="42%" alt="InsurIntellect white-background clause evidence logo"/>
 </div>
 
 **InsurIntellect** is an AI agent system tailored for insurance policy and clause PDFs. It builds a local clause corpus, retrieves evidence with vector + BM25 search, and uses an OpenAI-compatible large language model only to narrate answers that can be traced back to document, page, and excerpt.

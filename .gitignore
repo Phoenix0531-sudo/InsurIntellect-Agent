@@ -32,6 +32,8 @@ MANIFEST
 .ipynb_checkpoints/
 
 # 虚拟环境
+.venv/
+.ruff_cache/
 venv/
 env/
 ENV/
@@ -54,6 +56,7 @@ desktop.ini
 data/documents/pdfs/*.pdf
 data/vector_db/
 data/database/*.db
+data/db/*.db
 data/processed/
 data/cache/
 data/documents
@@ -89,8 +92,7 @@ logs/
 *.tmp
 *.temp
 
-# Docker
-.dockerignore
+# Docker build artifacts
 
 # 模型权重（本地存储；勿忽略 app/models Python 包）
 /models/

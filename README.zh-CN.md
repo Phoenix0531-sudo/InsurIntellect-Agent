@@ -23,7 +23,7 @@
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
 <div align="center">
-  <img align="center" src="docs/screenshots/readme_logo.svg" width="42%" alt="InsurIntellect 白底 mascot 标识"/>
+  <img align="center" src="docs/screenshots/readme_logo.svg" width="42%" alt="InsurIntellect 白底条款证据标识"/>
 </div>
 
 **InsurIntellect** 是面向保险条款 / 保单 PDF 的 AI Agent 系统。它构建本地条款语料库，用向量 + BM25 检索定位证据，再由 OpenAI 兼容大语言模型只负责把可追溯证据组织成回答。
