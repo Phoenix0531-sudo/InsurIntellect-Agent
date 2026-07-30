@@ -56,10 +56,14 @@ def test_docker_requirements_avoid_torch_download_path():
     assert not any(line.startswith("torch") for line in package_lines)
 
 
-def test_pyproject_is_tool_config_not_duplicate_project_metadata():
+def test_pyproject_has_project_metadata_and_no_setup_py():
+    """setup.py was removed; pyproject.toml now carries full [project] metadata."""
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
     assert "[tool.ruff]" in text
     assert "[tool.pytest.ini_options]" in text
-    assert "[project]" not in text
-    assert "dependencies = [" not in text
+    assert "[project]" in text
+    assert 'name = "insurintellect-agent"' in text
+    assert 'requires-python = ">=3.11"' in text
+    # setup.py must not exist
+    assert not (ROOT / "setup.py").exists()

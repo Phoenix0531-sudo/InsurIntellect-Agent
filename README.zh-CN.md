@@ -370,7 +370,7 @@ InsurIntellect-Agent
 ├── requirements-dev.txt
 ├── requirements-docker.txt    # Docker 快速 health/demo 配置，不下载 torch
 ├── docker-compose.yml         # 固定 container_name: insurintellect-agent
-└── pyproject.toml             # ruff / pytest 工具配置
+└── pyproject.toml             # 项目元数据 + ruff / pytest 工具配置
 ```
 
 ---

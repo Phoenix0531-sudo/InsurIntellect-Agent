@@ -2,6 +2,52 @@
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "insurintellect-agent"
+version = "1.0.0"
+description = "Local insurance-clause RAG demo with hybrid retrieval, cited answers, and regulated-advice refusal boundaries"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/Phoenix0531-sudo/InsurIntellect-Agent"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+    "httpx>=0.28.1",
+]
+advanced = [
+    "pypdf>=5.0.0",
+    "PyPDF2>=3.0.0",
+    "pdfplumber>=0.11.10",
+    "pytesseract>=0.3.0",
+    "Pillow>=10.0.0",
+    "beautifulsoup4>=4.15.0",
+    "unstructured>=0.18.0",
+    "asyncpg>=0.29.0",
+    "pandas>=2.0.0",
+]
+all = [
+    "insurintellect-agent[dev]",
+    "insurintellect-agent[advanced]",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100

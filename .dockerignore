@@ -39,3 +39,15 @@ temp/
 models/
 *.bin
 *.safetensors
+
+# Unnecessary dev/test files not needed in image
+tmp_save_test.py
+docs/
+monitoring/
+tests/
+.github/
+.editorconfig
+CHANGELOG.md
+requirements-advanced.txt
+requirements-optional.txt
+requirements-dev.txt

@@ -94,6 +94,8 @@ logs/
 *.temp
 
 # Docker build artifacts
+tmp_save_test.py
+scripts/__pycache__/
 
 # 模型权重（本地存储；勿忽略 app/models Python 包）
 /models/
