@@ -1,47 +1,76 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="860" height="260" viewBox="0 0 860 260" role="img" aria-label="InsurIntellect logo on white background">
-  <defs>
-    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#33B7FF"/>
-      <stop offset="0.48" stop-color="#1D9CFF"/>
-      <stop offset="1" stop-color="#0B5BD3"/>
-    </linearGradient>
-    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#172554"/>
-      <stop offset="1" stop-color="#0F172A"/>
-    </linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#0F172A" flood-opacity="0.13"/>
-    </filter>
-  </defs>
-  <rect width="860" height="260" rx="34" fill="#FFFFFF"/>
-  <rect x="18" y="18" width="824" height="224" rx="30" fill="#FFFFFF" stroke="#E2E8F0"/>
-  <path d="M50 197 C180 120, 285 224, 428 140 C545 71, 666 64, 810 105" fill="none" stroke="#E0F2FE" stroke-width="18" stroke-linecap="round"/>
-  <path d="M54 204 C182 132, 294 216, 427 146 C544 84, 668 80, 806 114" fill="none" stroke="#1D9CFF" stroke-width="3.5" stroke-linecap="round" opacity="0.45"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="640" viewBox="0 0 820 640" role="img" aria-labelledby="title desc">
+  <title id="title">InsurIntellect mascot logo</title>
+  <desc id="desc">A friendly blue insurance AI mascot with a shield-shaped head above a bold InsurIntellect wordmark on a white background.</desc>
 
-  <g transform="translate(78 54)" filter="url(#shadow)">
-    <rect x="0" y="0" width="154" height="154" rx="38" fill="#F8FBFF" stroke="#CFE7FF"/>
-    <g transform="translate(36 28)">
-      <path d="M12 0h48l24 24v72a12 12 0 0 1-12 12H12A12 12 0 0 1 0 96V12A12 12 0 0 1 12 0z" fill="#FFFFFF" stroke="#0B5BD3" stroke-width="3"/>
-      <path d="M60 0v24h24" fill="none" stroke="#0B5BD3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      <rect x="15" y="34" width="41" height="5" rx="2.5" fill="#BFDBFE"/>
-      <rect x="15" y="49" width="53" height="5" rx="2.5" fill="#DBEAFE"/>
-      <rect x="15" y="64" width="35" height="5" rx="2.5" fill="#E0E7FF"/>
-      <path d="M56 56l28 12v18c0 20-13.5 35-28 41-14.5-6-28-21-28-41V68l28-12z" fill="url(#blue)"/>
-      <path d="M44 86l9 9 19-22" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect width="820" height="640" fill="#FFFFFF"/>
+
+  <g id="mascot" transform="translate(0 4)">
+    <!-- rear policy card, giving the mascot an insurance-clause identity -->
+    <g transform="translate(468 88) rotate(8)">
+      <path d="M18 0h88l36 36v132c0 10-8 18-18 18H18c-10 0-18-8-18-18V18C0 8 8 0 18 0z" fill="#F8FAFC" stroke="#07111F" stroke-width="9" stroke-linejoin="round"/>
+      <path d="M106 0v35h36" fill="#E0F2FE" stroke="#07111F" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="30" y="58" width="70" height="9" rx="4.5" fill="#94A3B8"/>
+      <rect x="30" y="82" width="86" height="9" rx="4.5" fill="#CBD5E1"/>
+      <rect x="30" y="106" width="58" height="9" rx="4.5" fill="#CBD5E1"/>
+      <path d="M46 148l17 17 36-43" fill="none" stroke="#14B8A6" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- arms -->
+    <g stroke="#07111F" stroke-width="11" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M282 284c-42 14-66 47-64 91" fill="none"/>
+      <path d="M538 284c42 14 66 47 64 91" fill="none"/>
+      <rect x="201" y="363" width="68" height="80" rx="28" fill="#8AA6B2" transform="rotate(-9 235 403)"/>
+      <rect x="551" y="363" width="68" height="80" rx="28" fill="#8AA6B2" transform="rotate(9 585 403)"/>
+      <rect x="212" y="378" width="47" height="24" rx="12" fill="#06B6D4" transform="rotate(-9 235 390)" stroke-width="0"/>
+      <rect x="562" y="378" width="47" height="24" rx="12" fill="#06B6D4" transform="rotate(9 585 390)" stroke-width="0"/>
+    </g>
+
+    <!-- legs -->
+    <g stroke="#07111F" stroke-width="11" stroke-linejoin="round">
+      <rect x="335" y="392" width="58" height="88" rx="18" fill="#2563EB"/>
+      <rect x="427" y="392" width="58" height="88" rx="18" fill="#2563EB"/>
+      <rect x="337" y="433" width="54" height="21" rx="10" fill="#06B6D4" stroke-width="0"/>
+      <rect x="429" y="433" width="54" height="21" rx="10" fill="#06B6D4" stroke-width="0"/>
+      <rect x="304" y="463" width="99" height="52" rx="24" fill="#8AA6B2"/>
+      <rect x="417" y="463" width="99" height="52" rx="24" fill="#8AA6B2"/>
+    </g>
+
+    <!-- torso -->
+    <g stroke="#07111F" stroke-width="11" stroke-linejoin="round">
+      <rect x="307" y="258" width="206" height="154" rx="40" fill="#14B8A6"/>
+      <path d="M476 265c22 8 37 28 37 53v54c0 22-18 40-40 40h-29c23-23 38-60 32-147z" fill="#0F766E" opacity="0.55" stroke-width="0"/>
+      <rect x="347" y="294" width="126" height="56" rx="19" fill="#07111F"/>
+      <rect x="370" y="312" width="80" height="16" rx="8" fill="#22D3EE" stroke-width="0"/>
+      <path d="M374 378l22 22 50-59" fill="none" stroke="#FACC15" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- neck -->
+    <rect x="365" y="230" width="90" height="50" rx="20" fill="#8AA6B2" stroke="#07111F" stroke-width="11"/>
+    <rect x="407" y="236" width="33" height="38" rx="14" fill="#64748B" opacity="0.42"/>
+
+    <!-- shield head -->
+    <g stroke="#07111F" stroke-width="12" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M292 91c0-30 24-54 54-54h128c30 0 54 24 54 54v93c0 80-65 126-118 144-53-18-118-64-118-144V91z" fill="#2563EB"/>
+      <path d="M489 48c24 8 39 29 39 55v81c0 72-52 115-99 136 28-47 51-129 60-272z" fill="#1D4ED8" opacity="0.58" stroke-width="0"/>
+      <path d="M331 82h158v43c0 17-14 31-31 31h-96c-17 0-31-14-31-31V82z" fill="#07111F"/>
+      <rect x="361" y="99" width="98" height="19" rx="9.5" fill="#22D3EE" stroke-width="0"/>
+      <circle cx="365" cy="190" r="32" fill="#07111F"/>
+      <circle cx="455" cy="190" r="32" fill="#07111F"/>
+      <circle cx="365" cy="190" r="16" fill="#FACC15" stroke-width="0"/>
+      <circle cx="455" cy="190" r="16" fill="#FACC15" stroke-width="0"/>
+      <path d="M392 240c13 8 25 8 38 0" fill="none" stroke="#E0F2FE" stroke-width="9"/>
+      <rect x="519" y="120" width="30" height="24" rx="9" fill="#07111F"/>
+      <rect x="519" y="158" width="30" height="24" rx="9" fill="#07111F"/>
     </g>
   </g>
 
-  <g font-family="Inter, Segoe UI, Arial, sans-serif">
-    <text x="270" y="98" font-size="46" font-weight="800" fill="url(#ink)" letter-spacing="-1.2">InsurIntellect</text>
-    <text x="272" y="130" font-size="17" font-weight="600" fill="#1D4ED8" letter-spacing="0.25">Clause-grounded insurance PDF RAG</text>
-    <text x="272" y="163" font-size="15" fill="#475569">Local corpus · hybrid retrieval · cited answers · honest refusal</text>
-    <g transform="translate(272 184)">
-      <rect x="0" y="0" width="94" height="26" rx="13" fill="#EFF6FF" stroke="#BFDBFE"/>
-      <text x="47" y="17" text-anchor="middle" font-size="12" font-weight="700" fill="#1D4ED8">RAGFlow-lite</text>
-      <rect x="106" y="0" width="88" height="26" rx="13" fill="#F8FAFC" stroke="#CBD5E1"/>
-      <text x="150" y="17" text-anchor="middle" font-size="12" font-weight="700" fill="#334155">No advice</text>
-      <rect x="206" y="0" width="108" height="26" rx="13" fill="#ECFDF5" stroke="#BBF7D0"/>
-      <text x="260" y="17" text-anchor="middle" font-size="12" font-weight="700" fill="#047857">Traceable</text>
-    </g>
-  </g>
+  <text x="410" y="594"
+        text-anchor="middle"
+        font-family="Arial Black, Inter, Segoe UI Black, Arial, sans-serif"
+        font-size="73"
+        font-weight="900"
+        letter-spacing="-3"
+        textLength="755"
+        lengthAdjust="spacingAndGlyphs"
+        fill="#020617">InsurIntellect</text>
 </svg>
