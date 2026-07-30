@@ -13,8 +13,6 @@ from __future__ import annotations
 import asyncio
 from typing import List, Optional, Sequence
 
-import torch
-
 from app.core.app_logging import get_logger
 from app.core.config import settings
 
@@ -55,6 +53,8 @@ class EmbeddingService:
                 if HuggingFaceEmbeddings is None:
                     raise RuntimeError("HuggingFaceEmbeddings 未安装或不可用")
                 logger.info("初始化本地 HuggingFaceEmbeddings: model=%s", local_model)
+                import torch
+
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 # normalize_embeddings helps cosine scores stay comparable for threshold gates
                 self._embedding = HuggingFaceEmbeddings(

@@ -224,6 +224,8 @@ uv venv .venv --python 3.11
 # Windows: .venv\Scripts\activate
 source .venv/bin/activate
 uv pip install -r requirements-dev.txt
+# 仅需要高级解析 / OCR 时再安装：
+# uv pip install -r requirements-advanced.txt
 
 cp .env.example .env
 # 填写 OPENAI_BASE_URL / OPENAI_API_KEY（OpenAI 兼容网关）
@@ -278,7 +280,7 @@ docker compose ps
 # URL: http://[IP]:8766/
 ```
 
-`docker-compose.yml` 明确设置 `container_name: insurintellect-agent`，避免出现一堆匿名项目容器时分不清哪个是哪个。
+`docker-compose.yml` 明确设置 `container_name: insurintellect-agent`，避免出现一堆匿名项目容器时分不清哪个是哪个。Docker 镜像默认使用 `requirements-docker.txt` 与 `OPENAI_EMBEDDING_MODEL=local:hash`，因此能快速构建并暴露 health，不会默认下载 torch / HuggingFace 权重；完整 BGE 演示仍推荐走上面的 uv 路径。
 
 ### 5. 固定回归（服务需已启动）
 
@@ -366,6 +368,7 @@ InsurIntellect-Agent
 ├── requirements.txt           # 轻量主路径
 ├── requirements-advanced.txt  # 可选 OCR / unstructured 解析
 ├── requirements-dev.txt
+├── requirements-docker.txt    # Docker 快速 health/demo 配置，不下载 torch
 ├── docker-compose.yml         # 固定 container_name: insurintellect-agent
 └── pyproject.toml             # ruff / pytest 工具配置
 ```
@@ -401,7 +404,7 @@ GitHub Actions 跑同一套 critical ruff + `pytest tests/`，**不要求** 在�
 - 完整 PDF 阅读器作为一期硬需求（资源可能用于高亮演示）
 - 产品化 text-to-SQL / KG / 多 Agent 编排 UI
 
-Docker 可选，但现在也统一使用 **8766** 服务端口。Compose 固定容器名为 `insurintellect-agent`，方便在 Docker Desktop 里识别。
+Docker 可选，但现在也统一使用 **8766** 服务端口。Compose 固定容器名为 `insurintellect-agent`，方便在 Docker Desktop 里识别。容器默认使用 `local:hash` 嵌入以便快速健康启动；完整 BGE 检索演示仍以 uv 本地路径为主。
 
 ---
 

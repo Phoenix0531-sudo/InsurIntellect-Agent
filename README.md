@@ -224,6 +224,8 @@ uv venv .venv --python 3.11
 # Windows: .venv\Scripts\activate
 source .venv/bin/activate
 uv pip install -r requirements-dev.txt
+# Optional heavy parsers/OCR only when needed:
+# uv pip install -r requirements-advanced.txt
 
 cp .env.example .env
 # set OPENAI_BASE_URL / OPENAI_API_KEY for your OpenAI-compatible gateway
@@ -278,7 +280,7 @@ docker compose ps
 # URL: http://[IP]:8766/
 ```
 
-The Compose file intentionally sets `container_name: insurintellect-agent` to avoid anonymous or ambiguous Docker Desktop entries.
+The Compose file intentionally sets `container_name: insurintellect-agent` to avoid anonymous or ambiguous Docker Desktop entries. The Docker image uses `requirements-docker.txt` and `OPENAI_EMBEDDING_MODEL=local:hash` by default so the container can build and expose health quickly without downloading torch/HuggingFace weights; use the uv path above for the full BGE demo.
 
 ### 5. Fixed smoke (server must be up)
 
@@ -366,6 +368,7 @@ InsurIntellect-Agent
 ├── requirements.txt           # lightweight main path
 ├── requirements-advanced.txt  # optional OCR / unstructured parsing
 ├── requirements-dev.txt
+├── requirements-docker.txt    # quick Docker health/demo profile, no torch download
 ├── docker-compose.yml         # fixed container_name: insurintellect-agent
 └── pyproject.toml             # ruff / pytest tool config
 ```
@@ -401,7 +404,7 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 - Full PDF.js reader as a product requirement (assets may exist for highlight demos)
 - Productized text-to-SQL / KG / multi-agent orchestration UI
 
-Docker is optional but now follows the same **8766** service port. Compose fixes the readable container name as `insurintellect-agent`, so it is easy to identify in Docker Desktop.
+Docker is optional but now follows the same **8766** service port. Compose fixes the readable container name as `insurintellect-agent`, so it is easy to identify in Docker Desktop. The container defaults to `local:hash` embeddings for fast health/demo startup; the uv path remains the recommended route for the full BGE retrieval demo.
 
 ---
 
