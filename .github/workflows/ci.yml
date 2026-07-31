@@ -73,3 +73,32 @@ jobs:
               echo "No tests directory; structure checks only"
             fi
           fi
+
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: insurintellect-agent:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-check image entrypoint
+        run: |
+          docker run --rm -d --name ci-smoke -p 8766:8766 \
+            -e HOST=0.0.0.0 -e PORT=8766 -e DEBUG=false \
+            -e CHROMA_DISABLE_TELEMETRY=1 \
+            insurintellect-agent:ci
+          sleep 8
+          docker exec ci-smoke python -c "import urllib.request,json; r=urllib.request.urlopen('http://127.0.0.1:8766/api/v1/health/',timeout=10); print('health', r.status, r.read()[:120])"
+          docker rm -f ci-smoke
