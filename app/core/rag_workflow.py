@@ -642,11 +642,17 @@ def set_bm25_resources(index_payload: Any, chunk_map: Dict[str, str]) -> None:
 
 
 if __name__ == "__main__":
-    # 测试代码
+    # 手工冒烟入口：直接检索 + RRF 融合（不跑 long-running agent 链）
+    import asyncio
+
     agent = InsurIntellectAgent()
     test_query = "什么是车险的免赔额？"
-    result = agent.answer(test_query)
-    logger.info(f"用户问题: {test_query}")
-    logger.info(f"智能代理回答: {result}")
+    try:
+        result = asyncio.run(agent.abuild_context(test_query, top_k=5))
+    except Exception as exc:  # pragma: no cover - 仅本地手动跑
+        logger.error("abuild_context failed: %s", exc, exc_info=True)
+        raise
+    logger.info("用户问题: %s", test_query)
+    logger.info("检索结果 chunks: %d", len(result.get("chunks", [])) if isinstance(result, dict) else 0)
 
 
