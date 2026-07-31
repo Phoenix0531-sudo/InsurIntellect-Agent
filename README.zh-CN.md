@@ -224,8 +224,6 @@ uv venv .venv --python 3.11
 # Windows: .venv\Scripts\activate
 source .venv/bin/activate
 uv pip install -r requirements-dev.txt
-# 仅需要高级解析 / OCR 时再安装：
-# uv pip install -r requirements-advanced.txt
 
 cp .env.example .env
 # 填写 OPENAI_BASE_URL / OPENAI_API_KEY（OpenAI 兼容网关）
@@ -366,7 +364,6 @@ InsurIntellect-Agent
 ├── docs/screenshots/
 ├── .env.example
 ├── requirements.txt           # 轻量主路径
-├── requirements-advanced.txt  # 可选 OCR / unstructured 解析
 ├── requirements-dev.txt
 ├── requirements-docker.txt    # Docker 快速 health/demo 配置，不下载 torch
 ├── docker-compose.yml         # 固定 container_name: insurintellect-agent

@@ -224,8 +224,6 @@ uv venv .venv --python 3.11
 # Windows: .venv\Scripts\activate
 source .venv/bin/activate
 uv pip install -r requirements-dev.txt
-# Optional heavy parsers/OCR only when needed:
-# uv pip install -r requirements-advanced.txt
 
 cp .env.example .env
 # set OPENAI_BASE_URL / OPENAI_API_KEY for your OpenAI-compatible gateway
@@ -366,7 +364,6 @@ InsurIntellect-Agent
 ├── docs/screenshots/
 ├── .env.example
 ├── requirements.txt           # lightweight main path
-├── requirements-advanced.txt  # optional OCR / unstructured parsing
 ├── requirements-dev.txt
 ├── requirements-docker.txt    # quick Docker health/demo profile, no torch download
 ├── docker-compose.yml         # fixed container_name: insurintellect-agent

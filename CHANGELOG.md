@@ -18,19 +18,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - Reconstructed missing `app/models` package (`schemas.py`, `database_models.py`, `__init__.py`)
 - Migrated project metadata to `pyproject.toml`; `setup.py` retained only for editable installs
-- Dockerfile rebuilt as multi-stage (`deps` + `runtime`), `--no-compile`, `127.0.0.1` healthcheck
+- Dockerfile rebuilt as multi-stage (`deps` + `runtime`), `--no-compile`, `[IP]` healthcheck
 - README rewritten in FinRobot-style layout (EN + zh-CN) with real screenshots, no emoji in body
 - Citation, refusal, response-shaping, and query-history logic extracted into dedicated modules
 - Main query path slimmed to `retrieve -> refuse-or-summarize -> answer with citations`
 - Default provider switched from SiliconFlow to local new-api (OpenAI-compatible gateway)
+- Stripped ~10 dead config fields (regulatory/rerank-tuning, security/JWT, metrics, upload quota)
+  so `Settings` surfaces only what the live path actually reads
 
 ### Removed
 - ~925 lines of unreachable advanced paths (`stream_query`, `build_context` sync, `answer()`,
   `run_lead_reviewer`/`run_report_author`/`_dynamic_ranking`, regulatory reranker family)
+- `app/services/document_parser_service.py` (319 lines) — was the only consumer of the
+  `unstructured` / `pdfplumber` / `pytesseract` stack; no live ingestion code mentions it
+- `app/core/timeliness.py` (127 lines) — `compute_timeliness_score` last call site was inside
+  the deleted `_dynamic_ranking` method; module relied on `settings.TIMELINESS_*` fields that
+  were never declared in `config.py`
+- `app/core/ingestion_config.yml` (106 lines) — 0 importers, never loaded by any Python path
+- `requirements-advanced.txt` plus `pyproject.toml` `[advanced]` / `[all]` extras — depend on
+  packages that no longer appear anywhere in `app/`, `tests/`, or `scripts/`
 - Redundant `static/js/script.js`; frontend consolidated to a single `static/js/app.js` entry
 - Logo SVG and other unused files; replaced by GPT-generated PNG mascot
 - Unused `scikit-learn` dependency (~150 MB Docker image savings)
 - Dead `egg-info` artifact from working tree (gitignored)
+- Stray root file `-` (6555-byte backfill report JSON, miscommitted on 6月 8)
 
 ### Fixed
 - `sqlalchemy.ext.declarative.declarative_base` deprecation warning

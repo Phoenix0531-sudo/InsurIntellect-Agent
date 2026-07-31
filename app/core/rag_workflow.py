@@ -20,47 +20,29 @@ Version: 1.0.0
 import os
 import json
 import logging
-from app.core.app_logging import get_logger as app_get_logger
-import numpy as np
-from typing import Dict, List, Any, Tuple
-from datetime import datetime
 import asyncio
+from typing import Any, Dict, List, Tuple
 
-# 在导入langchain之前设置环境变量（OpenAI-compatible；兼容 siliconflow 回退）
+from app.core.app_logging import get_logger as app_get_logger
 from app.core.config import settings
-_api_key = settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY or ""
-_base_url = settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL or ""
-if _api_key:
-    os.environ["OPENAI_API_KEY"] = _api_key
-if _base_url:
-    os.environ["OPENAI_BASE_URL"] = _base_url
-
 from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
-# 新增导入：用于构建提示与解析输出（AI判别辅助）
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from pydantic import ValidationError
-from app.models.schemas import RegulatoryCheck, QueryIntent
-
-# 导入应用配置和提示模板
-from app.prompts import (
-    QUERY_ARCHITECT_PROMPT,
-    LEAD_REVIEWER_PROMPT,
-    REPORT_AUTHOR_PROMPT
-)
-from app.core.timeliness import compute_timeliness_score
+from app.models.schemas import QueryIntent
+from app.prompts import QUERY_ARCHITECT_PROMPT
 from app.core.fusion import reciprocal_rank_fusion
 import jieba
 from app.services.embedding_service import EmbeddingService
 from app.services.query_intent_service import QueryIntentService
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# 兼容代码回退：若未显式设置 OpenAI 凭据，则尝试 siliconflow 字段（仅作 artisan 兜底）
+_api_key = (settings.OPENAI_API_KEY or settings.SILICONFLOW_API_KEY or "").strip()
+_base_url = (settings.OPENAI_BASE_URL or settings.SILICONFLOW_BASE_URL or "").strip()
+if _api_key:
+    os.environ.setdefault("OPENAI_API_KEY", _api_key)
+if _base_url:
+    os.environ.setdefault("OPENAI_BASE_URL", _base_url)
+
 logger = logging.getLogger(__name__)
 
 
@@ -648,11 +630,11 @@ if __name__ == "__main__":
     agent = InsurIntellectAgent()
     test_query = "什么是车险的免赔额？"
     try:
-        result = asyncio.run(agent.abuild_context(test_query, top_k=5))
+        result = asyncio.run(agent.abuild_context(test_query))
     except Exception as exc:  # pragma: no cover - 仅本地手动跑
         logger.error("abuild_context failed: %s", exc, exc_info=True)
         raise
     logger.info("用户问题: %s", test_query)
-    logger.info("检索结果 chunks: %d", len(result.get("chunks", [])) if isinstance(result, dict) else 0)
+    logger.info("检索结果 chunks: %d", len(result.get("retrieved_chunks", [])) if isinstance(result, dict) else 0)
 
 

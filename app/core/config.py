@@ -61,10 +61,8 @@ class Settings(BaseSettings):
 
     # 数据库配置
     DATABASE_URL: str = Field(default="sqlite:///./data/database/app.db", description="数据库URL")
-    DATABASE_ECHO: bool = Field(default=False, description="数据库回显")
 
-    # 文件上传配置
-    MAX_UPLOAD_SIZE: int = Field(default=10485760, description="最大上传文件大小")  # 10MB
+    # 文件上传配置（作品集 v1 不提供 UI 上传；预置 samples/ + simple_ingest.py）
     ALLOWED_FILE_TYPES: List[str] = Field(default=["pdf"], description="允许的文件类型")
     PDF_STORAGE_PATH: str = Field(default="./data/documents/pdfs", description="PDF文件存储路径")
     PROCESSED_DATA_PATH: str = Field(default="./data/processed", description="处理后数据存储路径")
@@ -72,7 +70,6 @@ class Settings(BaseSettings):
     # 文档处理配置
     CHUNK_SIZE: int = Field(default=400, description="文档块大小")
     CHUNK_OVERLAP: int = Field(default=40, description="文档块重叠")
-    MAX_CHUNKS_PER_DOCUMENT: int = Field(default=1000, description="每个文档最大块数")
 
     # 查询配置
     MAX_RETRIEVED_CHUNKS: int = Field(default=8, description="最大检索块数")
@@ -104,17 +101,8 @@ class Settings(BaseSettings):
         default=5.0, description="等待全局并发队列信号量的最大秒数，超时则快速降级"
     )
 
-    # 安全配置
-    SECRET_KEY: str = Field(default="your-secret-key-here", description="密钥")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, description="访问令牌过期时间")
-
-    # 监控配置
-    ENABLE_METRICS: bool = Field(default=True, description="启用指标")
-    METRICS_PORT: int = Field(default=9090, description="指标端口")
-
-    # 监控和自动重启设置
+    # 监控和自动重启设置（默认关闭；演示用 uvicorn 自带重载即可）
     ENABLE_AUTO_RESTART: bool = Field(default=False, description="启用自动重启功能")
-    HEALTH_CHECK_INTERVAL: int = Field(default=30, description="健康检查间隔（秒）")
     MAX_RESTART_ATTEMPTS: int = Field(default=3, description="最大重启尝试次数")
     RESTART_COOLDOWN: int = Field(default=60, description="重启冷却时间（秒）")
 
@@ -122,24 +110,8 @@ class Settings(BaseSettings):
     ENABLE_STRUCTURED_LOGGING: bool = Field(default=True, description="启用结构化日志")
     STRUCTURED_LOG_FILE: str = Field(default="logs/structured.log", description="结构化日志文件路径")
 
-    # 监管感知重排序设置（主演示默认关闭，避免额外 LLM 调用）
-    ENABLE_REGULATORY_RERANK: bool = Field(default=False, description="启用监管关联重排序")
-    REGULATORY_FIXED_BOOST: float = Field(default=100.0, description="监管相关固定加分")
-    REGULATORY_KEYWORDS: List[str] = Field(
-        default=["监管", "合规", "评级", "ESG", "银保监", "保监"],
-        description="用于回退判断的监管关键词",
-    )
-
-    # 攻关任务四：新排序规则（线性加权 + 阶跃时效 + ESG 加分 + 过期惩罚）
-    RERANK_ORIG_WEIGHT: float = Field(default=0.6, description="原始相似度权重 (W_orig)")
-    RERANK_BIZ_WEIGHT: float = Field(default=0.4, description="业务得分权重 (W_biz)")
-    RERANK_RECENCY_BOOST: float = Field(default=0.4, description="时效性阶跃加分（6个月内 +0.4）")
-    RERANK_COMPLIANCE_KEYWORDS: List[str] = Field(default=["ESG"], description="文档内触发的合规关键字")
-    RERANK_COMPLIANCE_BOOST_SCORE: float = Field(default=0.15, description="ESG 加分幅度 (+0.15)")
-    RERANK_EXPIRED_PENALTY: float = Field(default=0.3, description="过期文档固定惩罚因子 (×0.3)")
-
     # 后台任务配置
-    CELERY_BROKER_URL: Optional[str] = Field(default=None, description="Celery代理URL")
+    CELERY_BROKER_URL: Optional[str] = Field(default=None, description="Celery代理URL（仅配置占位，当前主路径不依赖 Celery）")
     CELERY_RESULT_BACKEND: Optional[str] = Field(default=None, description="Celery结果后端")
 
     # LLM 并发与可靠性控制

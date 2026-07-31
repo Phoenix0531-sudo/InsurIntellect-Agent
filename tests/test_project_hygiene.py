@@ -32,14 +32,24 @@ def test_dockerfile_uses_demo_port_and_healthcheck():
     assert "/api/v1/health/" in dockerfile
 
 
-def test_requirements_split_keeps_advanced_ocr_out_of_main_path():
+def test_main_path_requirements_stay_light():
+    """Main-path requirements should not pull in heavy OCR/exotic DB deps.
+
+    The `requirements-advanced.txt` split was retired with the deletion of
+    document_parser_service.py and friends; assert the heavy deps ended up
+    *nowhere* in the active install graph.
+    """
     main = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    advanced = (ROOT / "requirements-advanced.txt").read_text(encoding="utf-8")
+    dev = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    docker = (ROOT / "requirements-docker.txt").read_text(encoding="utf-8")
 
     assert "PyMuPDF" in main
-    for heavy in ("unstructured", "pytesseract", "pdfplumber", "PyPDF2", "pandas"):
+    # No advanced-OCR-only file anymore
+    assert not (ROOT / "requirements-advanced.txt").exists()
+    for heavy in ("unstructured", "pytesseract", "pdfplumber", "PyPDF2", "pandas", "asyncpg"):
         assert heavy not in main
-        assert heavy in advanced
+        assert heavy not in dev
+        assert heavy not in docker
 
 
 def test_docker_requirements_avoid_torch_download_path():
