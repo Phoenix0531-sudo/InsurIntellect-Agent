@@ -1,15 +1,34 @@
-# ---------- deps stage (cached layer) ----------
-FROM python:3.11-slim AS deps
+# ---------- base stage: heavy wheels installed once (chromadb / scipy / numpy) ----------
+# Splitting the heavy DB layer from the light deps so changes to small packages
+# don't trigger a ~500s chromadb rebuild.
+FROM python:3.11-slim-bookworm AS heavy-deps
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_NO_COMPILE=1
 WORKDIR /app
 
-COPY requirements-docker.txt .
-RUN pip install --no-cache-dir --no-compile -r requirements-docker.txt
+COPY <<'EOF' /tmp/requirements-heavy.txt
+chromadb>=0.5.0
+langchain-chroma>=0.1.0
+numpy>=1.24.0
+PyMuPDF>=1.28.0
+jieba>=0.42.0
+rank_bm25>=0.2.2
+EOF
+RUN pip install --no-cache-dir --no-compile -r /tmp/requirements-heavy.txt
 
-# ---------- runtime stage ----------
-FROM python:3.11-slim AS runtime
+# ---------- light deps stage: smaller packages, change more often ----------
+FROM heavy-deps AS deps
+
+WORKDIR /app
+
+COPY requirements-docker.txt .
+# Strip the heavy packages already installed above to avoid re-resolving them.
+RUN grep -vE '^(chromadb|langchain-chroma|numpy|PyMuPDF|jieba|rank_bm25)' requirements-docker.txt > /tmp/requirements-light.txt \
+    && pip install --no-cache-dir --no-compile -r /tmp/requirements-light.txt
+
+# ---------- runtime stage: small app layer on top of cached deps ----------
+FROM deps AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -18,10 +37,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# copy installed packages from deps stage
-COPY --from=deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=deps /usr/local/bin /usr/local/bin
-
+# site-packages and python binary already inherited from the deps stage chain.
 COPY . .
 
 EXPOSE 8766

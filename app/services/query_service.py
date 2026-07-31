@@ -702,8 +702,9 @@ class QueryService:
                     return
 
                 # 在构建上下文前调用路由器（R4.2 - 流式路径），受开关控制
+                # SIMPLE 模式强制 RAG，跳过 advanced 路由（与非流式路径一致）
                 route_result = {"route": "RAG"}
-                if settings.ENABLE_QUERY_ROUTING:
+                if (not simple_mode) and settings.ENABLE_QUERY_ROUTING:
                     router = QueryRouterService(llm_service=llm_light)
                     try:
                         route_result = await router.route_query(request.question)
@@ -795,23 +796,24 @@ class QueryService:
                     or (question_for_retrieval if question_for_retrieval != request.question else None)
                 )
 
-                # 注入 KG 事实作为优先片段（SSE 路径）
-                try:
-                    kg_service = KGService()
-                    kg_facts = await kg_service.aget_facts(db, question_for_retrieval)
-                    if kg_facts:
-                        kg_chunk = {
-                            "chunk_id": None,
-                            "document_id": None,
-                            "document_name": "知识图谱事实",
-                            "content": "\n".join([f"- {f}" for f in kg_facts]),
-                            "page_number": "N/A",
-                            "similarity_score": 1.0,
-                            "metadata": {"is_kg": True, "facts_count": len(kg_facts)},
-                        }
-                        retrieved_chunks = [kg_chunk] + retrieved_chunks
-                except Exception as kg_err:
-                    logger.debug(f"KG事实注入失败(流式)：{kg_err}")
+                # 注入 KG 事实作为优先片段（仅 advanced / SSE 路径）
+                if not simple_mode:
+                    try:
+                        kg_service = KGService()
+                        kg_facts = await kg_service.aget_facts(db, question_for_retrieval)
+                        if kg_facts:
+                            kg_chunk = {
+                                "chunk_id": None,
+                                "document_id": None,
+                                "document_name": "知识图谱事实",
+                                "content": "\n".join([f"- {f}" for f in kg_facts]),
+                                "page_number": "N/A",
+                                "similarity_score": 1.0,
+                                "metadata": {"is_kg": True, "facts_count": len(kg_facts)},
+                            }
+                            retrieved_chunks = [kg_chunk] + retrieved_chunks
+                    except Exception as kg_err:
+                        logger.debug(f"KG事实注入失败(流式)：{kg_err}")
 
                 # Refusal gate for SSE path (public chunks empty)
                 best_sim = self._best_similarity(retrieved_chunks)
@@ -954,227 +956,6 @@ class QueryService:
 
         # 返回异步生成器（SSE字符串）
         return _sse_gen()
-
-    async def stream_query(
-        self,
-        db: AsyncSession,
-        request: QueryRequest,
-    ) -> Any:
-        """以事件流方式处理查询请求，逐步输出模型增量内容。
-
-        事件序列：
-        - {"type": "start", "question": ..., "query_type": ..., "timestamp": ...}
-        - {"type": "context", "rewritten_query": ..., "retrieved_chunks": [...]}
-        - {"type": "token", "content": "..."}  // 多次
-        - {"type": "end", "answer": "...", "response_time": S, "query_id": N, "success": True}
-        - 若失败：{"type": "error", "message": "..."}
-        """
-        start_time = datetime.utcnow()
-
-        async def _gen():
-            try:
-                # 准备 Agent 与（可选）查询重写
-                agent = self.agent
-                llm_core = LLMService.with_model(settings.OPENAI_MODEL_CORE)
-                llm_light = LLMService.with_model(settings.OPENAI_MODEL_LIGHT)
-                rewriter = QueryRewriterService(llm_service=llm_light)
-                question_for_retrieval = request.question
-                rewrite_result: Dict[str, Any] = {}
-                if settings.ENABLE_QUERY_REWRITING:
-                    try:
-                        chat_history = await self._get_chat_history(db, getattr(request, "session_id", None), limit=10)
-                        rewrite_result = await rewriter.rewrite_query(user_query=request.question, chat_history=chat_history)
-                        independent_q = rewrite_result.get("independent_query")
-                        if independent_q:
-                            question_for_retrieval = independent_q
-                    except Exception as e:
-                        logger.warning(f"流式查询重写失败，回退原始查询: {e}")
-
-                # 起始事件
-                yield {
-                    "type": "start",
-                    "question": request.question,
-                    "query_type": request.query_type,
-                    "timestamp": start_time.timestamp(),
-                }
-
-                if self._is_advice_or_guarantee_question(request.question):
-                    yield {
-                        "type": "end",
-                        "answer": self._refusal_answer("advice"),
-                        "response_time": (datetime.utcnow() - start_time).total_seconds(),
-                        "query_id": None,
-                        "success": True,
-                        "retrieved_chunks": [],
-                        "chunks_used": 0,
-                        "answer_kind": "advice",
-                        "embedding_provider": getattr(getattr(self, "embedding_service", None), "provider", None),
-                    }
-                    return
-
-                # 构建上下文（RAG前四步）
-                ctx = agent.build_context(question_for_retrieval)
-                retrieved_chunks = ctx.get("retrieved_chunks", []) or []
-                retrieved_chunks = self.curate_citations(
-                    retrieved_chunks,
-                    getattr(request, "question", "") or "",
-                    limit=4,
-                )
-                rewritten_query = (
-                    ctx.get("rewritten_query")
-                    or (rewrite_result.get("independent_query") if rewrite_result else None)
-                    or (question_for_retrieval if question_for_retrieval != request.question else None)
-                )
-
-                # Public context: drop zero-score fillers; refuse if weak/off-topic
-                best_sim = self._best_similarity(retrieved_chunks)
-                off_topic = self._is_off_topic(request.question, retrieved_chunks)
-                thr = float(getattr(settings, "SIMILARITY_THRESHOLD", 0.2))
-                if off_topic or (not retrieved_chunks) or best_sim < thr:
-                    yield {
-                        "type": "end",
-                        "answer": self._refusal_answer("insufficient_evidence"),
-                        "response_time": (datetime.utcnow() - start_time).total_seconds(),
-                        "query_id": None,
-                        "success": True,
-                        "retrieved_chunks": [],
-                        "chunks_used": 0,
-                        "answer_kind": "refusal",
-                        "confidence_score": round(best_sim, 4),
-                        "embedding_provider": getattr(getattr(self, "embedding_service", None), "provider", None),
-                    }
-                    return
-
-                pub_ctx = self.public_citations(retrieved_chunks)
-                yield {
-                    "type": "context",
-                    "rewritten_query": rewritten_query,
-                    "retrieved_chunks": pub_ctx,
-                    "route": "RAG",
-                }
-
-                if not retrieved_chunks:
-                    # 无上下文，直接返回错误并持久化错误历史
-                    error_msg = "未检索到与问题相关的文档片段"
-                    response_time = (datetime.utcnow() - start_time).total_seconds()
-                    try:
-                        await self._save_query_history(
-                            db,
-                            request.question,
-                            error_msg,
-                            request.query_type,
-                            response_time,
-                            0,
-                            getattr(request, "session_id", None),
-                            rewritten_query=rewritten_query,
-                            rewriting_metadata_json=json.dumps({"route": "RAG"}, ensure_ascii=False),
-                            retrieved_chunks_json=None,
-                        )
-                    except Exception:
-                        pass
-                    yield {"type": "error", "message": error_msg}
-                    return
-
-                # 进行流式生成（仅透传 token 事件；end 事件统一由此方法发送）
-                final_text = ""
-                response_time = 0.0
-                async for ev in llm_core.stream_answer(request.question, retrieved_chunks):
-                    etype = ev.get("type")
-                    if etype == "token":
-                        final_text += ev.get("content", "")
-                        yield ev
-                    elif etype == "end":
-                        response_time = float(ev.get("response_time", 0.0) or 0.0)
-                    elif etype == "error":
-                        # 输出错误并保存历史
-                        err_msg = ev.get("message") or "流式生成失败"
-                        response_time = float(ev.get("response_time", 0.0) or 0.0)
-                        try:
-                            await self._save_query_history(
-                                db,
-                                request.question,
-                                err_msg,
-                                request.query_type,
-                                response_time,
-                                len(retrieved_chunks),
-                                rewritten_query=rewritten_query,
-                                rewriting_metadata_json=json.dumps({"route": "RAG"}, ensure_ascii=False),
-                                retrieved_chunks_json=json.dumps(retrieved_chunks, ensure_ascii=False),
-                            )
-                        except Exception:
-                            pass
-                        yield {"type": "error", "message": err_msg}
-                        return
-
-                # 保存成功历史并发送最终 end 事件
-                try:
-                    # 记录路由为 RAG，并合并重写元数据（若存在）
-                    meta_payload = {"route": "RAG"}
-                    try:
-                        if rewrite_result:
-                            meta_payload.update({
-                                "primary_search_intent": rewrite_result.get("primary_search_intent"),
-                                "query_vectors": rewrite_result.get("query_vectors"),
-                                "micro_ontology": rewrite_result.get("micro_ontology"),
-                            })
-                    except Exception:
-                        pass
-                    rewriting_metadata_json = json.dumps(meta_payload, ensure_ascii=False)
-
-                    query_id = await self._save_query_history(
-                        db,
-                        request.question,
-                        final_text.strip() if final_text else "",
-                        request.query_type,
-                        response_time if response_time else (datetime.utcnow() - start_time).total_seconds(),
-                        len(retrieved_chunks),
-                        getattr(request, "session_id", None),
-                        rewritten_query=rewritten_query,
-                        rewriting_metadata_json=rewriting_metadata_json,
-                        retrieved_chunks_json=json.dumps(retrieved_chunks, ensure_ascii=False),
-                    )
-                except Exception as save_error:
-                    logger.warning(f"流式查询历史保存失败: {save_error}")
-                    query_id = None
-
-                # Classify stream end for UI state cards
-                _ans = final_text.strip() if final_text else ""
-                _kind = "answer"
-                _q = request.question or ""
-                if "未在已入库条款中找到充分依据" in _ans:
-                    _kind = "refusal"
-                elif self._is_advice_or_guarantee_question(_q):
-                    _kind = "advice"
-                elif "LLM 不可用" in _ans:
-                    _kind = "llm_unavailable"
-                elif "系统当前繁忙" in _ans or "出现了错误" in _ans:
-                    _kind = "degraded"
-                ui_chunks = self.citations_for_kind(_kind, retrieved_chunks)
-                try:
-                    chunk_payload = [
-                        rc.model_dump() if hasattr(rc, "model_dump") else dict(rc)
-                        for rc in self._to_retrieved_chunks(ui_chunks)
-                    ]
-                except Exception:
-                    chunk_payload = ui_chunks
-                yield {
-                    "type": "end",
-                    "answer": _ans,
-                    "response_time": response_time if response_time else (datetime.utcnow() - start_time).total_seconds(),
-                    "query_id": query_id,
-                    "success": True,
-                    "retrieved_chunks": chunk_payload,
-                    "chunks_used": len(chunk_payload),
-                    "answer_kind": _kind,
-                    "embedding_provider": getattr(getattr(self, "embedding_service", None), "provider", None),
-                }
-
-            except Exception as e:
-                logger.error(f"流式查询处理异常: {e}")
-                yield {"type": "error", "message": str(e)}
-
-        # 返回异步生成器
-        return _gen()
 
     async def _save_query_history(
         self,
