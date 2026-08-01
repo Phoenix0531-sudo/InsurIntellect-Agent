@@ -27,7 +27,7 @@ sqlalchemy>=2.0.0
 aiosqlite>=0.22.1
 
 # Retrieval / ranking
-numpy>=1.24.0
+numpy>=2.4.6
 jieba>=0.42.0
 rank_bm25>=0.2.2
 tqdm>=4.67.0
