@@ -28,7 +28,7 @@ aiosqlite>=0.22.1
 
 # Retrieval / ranking
 numpy>=1.24.0
-jieba>=0.42.0
+jieba>=0.42.1
 rank_bm25>=0.2.2
 tqdm>=4.67.0
 
