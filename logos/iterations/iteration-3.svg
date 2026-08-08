@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="InsurIntellect iteration 3 — dual cards with quote mark">
+  <!-- Stronger citation metaphor: stacked white cards + quote glyph -->
+  <g id="icon">
+    <rect x="24" y="24" width="464" height="464" rx="104" fill="#0B1F33"/>
+
+    <!-- Rear card -->
+    <rect x="168" y="100" width="220" height="268" rx="28" fill="#1D9CFF" transform="rotate(8 278 234)"/>
+
+    <!-- Front card -->
+    <g id="citation-card">
+      <rect x="120" y="128" width="240" height="292" rx="32" fill="#FFFFFF"/>
+
+      <!-- Quote mark as citation cue -->
+      <g id="quote" fill="#1D9CFF">
+        <path d="M168 188
+                 C168 168 180 156 198 156
+                 C210 156 220 166 220 180
+                 C220 196 208 208 192 208
+                 C186 208 180 206 176 202
+                 C180 220 192 236 212 246
+                 L196 268
+                 C168 254 148 228 148 196
+                 C148 192 148 190 150 186
+                 C156 188 162 188 168 188Z"/>
+        <path d="M248 188
+                 C248 168 260 156 278 156
+                 C290 156 300 166 300 180
+                 C300 196 288 208 272 208
+                 C266 208 260 206 256 202
+                 C260 220 272 236 292 246
+                 L276 268
+                 C248 254 228 228 228 196
+                 C228 192 228 190 230 186
+                 C236 188 242 188 248 188Z"/>
+      </g>
+
+      <!-- Clause lines under quote -->
+      <rect x="156" y="300" width="168" height="18" rx="9" fill="#C5D6E8"/>
+      <rect x="156" y="336" width="132" height="18" rx="9" fill="#C5D6E8"/>
+
+      <!-- Bottom evidence accent -->
+      <rect x="148" y="372" width="184" height="28" rx="14" fill="#1D9CFF"/>
+    </g>
+  </g>
+</svg>

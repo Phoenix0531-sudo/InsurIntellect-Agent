@@ -109,3 +109,5 @@ models/*.safetensors
 # 备份文件
 *.bak
 *.backup
+
+.skills/

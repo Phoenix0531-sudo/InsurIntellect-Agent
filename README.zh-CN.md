@@ -2,6 +2,8 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
+<div align="center">
+
 <!-- 动态 GitHub 徽章（仓库已公开） -->
 [![CI](https://img.shields.io/github/actions/workflow/status/Phoenix0531-sudo/InsurIntellect-Agent/ci.yml?branch=master&label=CI)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent)](LICENSE)
@@ -22,8 +24,10 @@
 
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
-<div align="center">
-  <img align="center" src="docs/screenshots/readme_logo.png" width="42%" alt="InsurIntellect 白底条款证据标识"/>
+<img align="center" src="docs/screenshots/readme_logo.png" width="72%" alt="InsurIntellect 组合标识 — 引用卡片图标 + 字标"/>
+
+<em>面向保险条款 PDF 的证据型 RAG &mdash; 条款检索优先，LLM 叙述其次，每个输出都带引用或诚实地拒答。</em>
+
 </div>
 
 **InsurIntellect** 是面向保险条款 / 保单 PDF 的 AI Agent 系统。它构建本地条款语料库，用向量 + BM25 检索定位证据，再由 OpenAI 兼容大语言模型只负责把可追溯证据组织成回答。
@@ -180,14 +184,16 @@ InsurIntellect 的核心设计原则是严格区分 **检索得到的条款证�
 
 ## 预览
 
-![InsurIntellect 条款 RAG 界面](docs/screenshots/preview.png)
-
-| 视图 | 文件 |
-|------|------|
-| 主界面双栏 | [docs/screenshots/preview.png](docs/screenshots/preview.png) |
-| 引用卡 | [docs/screenshots/citations.png](docs/screenshots/citations.png) |
-| 拒答 / 建议边界 | [docs/screenshots/refuse_advice.png](docs/screenshots/refuse_advice.png) |
-| 冷启动 / 空态 | [docs/screenshots/preview_empty.png](docs/screenshots/preview_empty.png) |
+<table align="center">
+  <tr>
+    <td align="center"><a href="docs/screenshots/preview.png"><img src="docs/screenshots/preview.png" alt="主界面双栏"/></a><br><sub><b>主界面双栏</b></sub></td>
+    <td align="center"><a href="docs/screenshots/citations.png"><img src="docs/screenshots/citations.png" alt="引用卡"/></a><br><sub><b>引用卡</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/refuse_advice.png"><img src="docs/screenshots/refuse_advice.png" alt="拒答 / 建议边界"/></a><br><sub><b>拒答 / 建议边界</b></sub></td>
+    <td align="center"><a href="docs/screenshots/preview_empty.png"><img src="docs/screenshots/preview_empty.png" alt="冷启动 / 空态"/></a><br><sub><b>冷启动 / 空态</b></sub></td>
+  </tr>
+</table>
 
 左栏：产品名、已索引文档、示例问题、免责。<br>
 右栏：对话、结构化答案、引用卡（文档名 / 页码 / 摘录）。<br>

@@ -2,6 +2,8 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
+<div align="center">
+
 <!-- Dynamic GitHub badges (repo public). -->
 [![CI](https://img.shields.io/github/actions/workflow/status/Phoenix0531-sudo/InsurIntellect-Agent/ci.yml?branch=master&label=CI)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent)](LICENSE)
@@ -22,8 +24,10 @@
 
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
-<div align="center">
-  <img align="center" src="docs/screenshots/readme_logo.png" width="42%" alt="InsurIntellect white-background clause evidence logo"/>
+<img align="center" src="docs/screenshots/readme_logo.png" width="72%" alt="InsurIntellect combination mark — citation card icon with wordmark"/>
+
+<em>Clause-grounded RAG for insurance policy PDFs &mdash; retrieved clauses first, LLM narration second, citations or refusal always.</em>
+
 </div>
 
 **InsurIntellect** is an AI agent system tailored for insurance policy and clause PDFs. It builds a local clause corpus, retrieves evidence with vector + BM25 search, and uses an OpenAI-compatible large language model only to narrate answers that can be traced back to document, page, and excerpt.
@@ -180,14 +184,16 @@ This is the insurance-clause analogue of a smart scheduler: it selects between r
 
 ## Preview
 
-![InsurIntellect clause RAG UI](docs/screenshots/preview.png)
-
-| View | File |
-|------|------|
-| Main two-pane UI | [docs/screenshots/preview.png](docs/screenshots/preview.png) |
-| Citation cards | [docs/screenshots/citations.png](docs/screenshots/citations.png) |
-| Refuse / advice boundary | [docs/screenshots/refuse_advice.png](docs/screenshots/refuse_advice.png) |
-| Empty / cold start | [docs/screenshots/preview_empty.png](docs/screenshots/preview_empty.png) |
+<table align="center">
+  <tr>
+    <td align="center"><a href="docs/screenshots/preview.png"><img src="docs/screenshots/preview.png" alt="Main two-pane UI"/></a><br><sub><b>Main two-pane UI</b></sub></td>
+    <td align="center"><a href="docs/screenshots/citations.png"><img src="docs/screenshots/citations.png" alt="Citation cards"/></a><br><sub><b>Citation cards</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/refuse_advice.png"><img src="docs/screenshots/refuse_advice.png" alt="Refuse / advice boundary"/></a><br><sub><b>Refuse / advice boundary</b></sub></td>
+    <td align="center"><a href="docs/screenshots/preview_empty.png"><img src="docs/screenshots/preview_empty.png" alt="Empty / cold start"/></a><br><sub><b>Empty / cold start</b></sub></td>
+  </tr>
+</table>
 
 Left pane: product name, indexed documents, demo prompts, disclaimer.<br>
 Right pane: dialogue, structured answer, citation cards (document / page / excerpt).<br>

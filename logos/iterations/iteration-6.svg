@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="InsurIntellect iteration 6 — ultra-simple citation card">
+  <!-- Even simpler than iteration-2: three big blocks only, maximum 16px survival -->
+  <g id="icon">
+    <rect x="24" y="24" width="464" height="464" rx="104" fill="#0B1F33"/>
+
+    <g id="citation-card">
+      <rect x="120" y="96" width="272" height="320" rx="44" fill="#FFFFFF"/>
+
+      <!-- Top identity bar -->
+      <rect x="152" y="136" width="208" height="48" rx="24" fill="#1D9CFF"/>
+
+      <!-- Mid clause mass -->
+      <rect x="152" y="220" width="208" height="32" rx="16" fill="#C5D6E8"/>
+      <rect x="152" y="276" width="160" height="32" rx="16" fill="#C5D6E8"/>
+
+      <!-- Bottom evidence mass -->
+      <rect x="140" y="340" width="232" height="48" rx="24" fill="#1D9CFF"/>
+    </g>
+  </g>
+</svg>
