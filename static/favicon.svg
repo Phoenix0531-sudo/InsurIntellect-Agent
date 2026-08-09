@@ -1,26 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="InsurIntellect iteration 5 — refined favicon citation card">
-  <!-- From iteration-2: tighter optical center, stronger page cue, slightly larger evidence block -->
-  <g id="icon">
-    <rect x="24" y="24" width="464" height="464" rx="104" fill="#0B1F33"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="InsurIntellect — citation card with layered clauses and evidence focus">
+  <!-- Outer rounded plate: deep navy -->
+  <rect x="24" y="24" width="464" height="464" rx="160" fill="#0B1F33"/>
 
-    <g id="citation-card">
-      <!-- Card body, optically centered a touch lower for balance -->
-      <rect x="124" y="100" width="264" height="312" rx="40" fill="#FFFFFF"/>
+  <g id="citation-card">
+    <!-- Card body: white with subtle blue stroke (edge depth, not flat) -->
+    <rect x="124" y="100" width="264" height="312" rx="40" fill="#FFFFFF" stroke="#1D9CFF" stroke-width="3" opacity="0.95"/>
 
-      <!-- Doc chip (left) -->
-      <rect x="156" y="140" width="104" height="44" rx="22" fill="#1D9CFF"/>
+    <!-- Doc chip (left): filled accent, rounded -->
+    <rect x="156" y="138" width="96" height="40" rx="20" fill="#1D9CFF"/>
 
-      <!-- Page cue (right) — square-ish for "page" not just a dot -->
-      <rect x="300" y="140" width="52" height="44" rx="14" fill="#E8F4FF"/>
-      <rect x="312" y="152" width="28" height="20" rx="5" fill="#1D9CFF"/>
+    <!-- Page cue (right): outlined chip, lighter visual weight -->
+    <rect x="300" y="138" width="52" height="40" rx="14" fill="none" stroke="#C5D6E8" stroke-width="3"/>
+    <rect x="312" y="150" width="28" height="18" rx="5" fill="#1D9CFF" opacity="0.55"/>
 
-      <!-- Two fat clause lines -->
-      <rect x="156" y="220" width="184" height="28" rx="14" fill="#C5D6E8"/>
-      <rect x="156" y="272" width="148" height="28" rx="14" fill="#C5D6E8"/>
+    <!-- Primary clause line: solid -->
+    <rect x="156" y="212" width="184" height="26" rx="13" fill="#1D9CFF"/>
 
-      <!-- Evidence block -->
-      <rect x="144" y="328" width="224" height="60" rx="20" fill="#1D9CFF"/>
-      <rect x="176" y="346" width="128" height="24" rx="12" fill="#FFFFFF"/>
-    </g>
+    <!-- Secondary clause line: receded via opacity -->
+    <rect x="156" y="252" width="148" height="22" rx="11" fill="#1D9CFF" opacity="0.4"/>
+
+    <!-- Tertiary clause line: furthest receded -->
+    <rect x="156" y="286" width="108" height="18" rx="9" fill="#1D9CFF" opacity="0.22"/>
+
+    <!-- Evidence block: layered with inner highlight -->
+    <rect x="144" y="330" width="224" height="56" rx="20" fill="#1D9CFF"/>
+    <rect x="160" y="346" width="56" height="24" rx="12" fill="#FFFFFF" opacity="0.92"/>
+
+    <!-- Evidence focus dot: double-circle target (BondLens-style amber peak analogue) -->
+    <circle cx="232" cy="358" r="11" fill="#FF6F61"/>
+    <circle cx="232" cy="358" r="4" fill="#FFFFFF"/>
+
+    <!-- Baseline indicator: receded -->
+    <line x1="156" y1="404" x2="356" y2="404" stroke="#C5D6E8" stroke-width="3" stroke-linecap="round" opacity="0.5"/>
   </g>
 </svg>
