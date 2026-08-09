@@ -70,10 +70,8 @@ def render(svg_path: Path, out_path: Path, size: int) -> None:
         else:
             draw.rectangle([x0, y0, x1, y1], fill=color)
 
-    # Flatten onto opaque white for broad compatibility (README / GitHub).
-    bg = Image.new("RGB", (size, size), (255, 255, 255))
-    bg.paste(img, mask=img.split()[-1])
-    bg.save(out_path, format="PNG", optimize=True)
+    # Keep transparent background (RGBA) so the logo sits directly on any backdrop.
+    img.save(out_path, format="PNG", optimize=True)
 
 
 def main() -> None:

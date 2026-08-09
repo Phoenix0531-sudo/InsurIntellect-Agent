@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="InsurIntellect iteration 5 — refined favicon citation card">
   <!-- From iteration-2: tighter optical center, stronger page cue, slightly larger evidence block -->
   <g id="icon">
-    <rect x="24" y="24" width="464" height="464" rx="104" fill="#0B1F33"/>
+    <rect x="24" y="24" width="464" height="464" rx="160" fill="#0B1F33"/>
 
     <g id="citation-card">
       <!-- Card body, optically centered a touch lower for balance -->
