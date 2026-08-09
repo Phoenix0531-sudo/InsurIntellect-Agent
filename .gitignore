@@ -97,6 +97,9 @@ logs/
 tmp_save_test.py
 scripts/__pycache__/
 
+# Node 项目目录（本机临时生成勿入 commit）
+node_modules/
+
 # 模型权重（本地存储；勿忽略 app/models Python 包）
 /models/
 models/*.bin
@@ -105,6 +108,11 @@ models/*.safetensors
 *.safetensors
 !app/models/
 !app/models/**
+# 白名单整个 app/models 包但显式把 bytecode 缓存黑回去，
+# 防 !app/models/** 让 *.pyc/_pycache_ 误入 commit
+app/models/__pycache__/
+app/models/**/*.pyc
+app/models/**/*.pyo
 
 # 备份文件
 *.bak
