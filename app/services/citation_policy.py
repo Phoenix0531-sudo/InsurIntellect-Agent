@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 WEAK_META_MARKERS = (
@@ -13,6 +14,10 @@ WEAK_META_MARKERS = (
     "状态：演示",
 )
 
+# 条款标识：多字短语直接 substring 命中即成立；
+# 单字 "第"/"条" 在中文常见文本里太多（第一道菜/面条/条件），
+# 单独 substring 会误判离题文本为"是条款"→ 过滤闸失守 → 离题带引用。
+# 故从 LITERAL 里删除单字，改由 _has_clause_marker 用 regex 匹配"第N条"类格式。
 CLAUSE_MARKERS = (
     "等待期",
     "犹豫期",
@@ -25,9 +30,19 @@ CLAUSE_MARKERS = (
     "被保险人",
     "理赔",
     "除外",
-    "第",
-    "条",
 )
+
+# 匹配 "第三条" / "第十三条" / "第 3 条" 等条款序号格式（含全角致密空格）
+_CLAUSE_NUM_RE = re.compile(r"第\s*[一二三四五六七八九十百零\d]{1,4}\s*条")
+
+
+def _has_clause_marker(text: str) -> bool:
+    """是否含条款标识：多字短语 substring 命中，或 "第N条" regex 命中。"""
+    if not text:
+        return False
+    if any(marker in text for marker in CLAUSE_MARKERS):
+        return True
+    return bool(_CLAUSE_NUM_RE.search(text))
 
 
 def chunk_text(chunk: Dict[str, Any]) -> str:
@@ -42,10 +57,12 @@ def is_weak_citation_chunk(chunk: Dict[str, Any]) -> bool:
     text = chunk_text(chunk).strip()
     if not text:
         return True
-    if len(text) < 40 and not any(marker in text for marker in CLAUSE_MARKERS):
+    has_clause = _has_clause_marker(text)
+    if len(text) < 40 and not has_clause:
         return True
     meta_hits = sum(1 for marker in WEAK_META_MARKERS if marker in text)
-    clause_hits = sum(1 for marker in CLAUSE_MARKERS if marker in text)
+    # clause_hits 仅统计多字 LITERAL 命中 + regex 命中（合计 0/1 的阈值语义不变）
+    clause_hits = sum(1 for marker in CLAUSE_MARKERS if marker in text) + (1 if has_clause else 0)
     if meta_hits >= 2 and clause_hits <= 1 and len(text) < 280:
         return True
     if meta_hits >= 3 and clause_hits == 0:
@@ -86,7 +103,7 @@ def relevance_bonus(question: str, chunk: Dict[str, Any]) -> float:
     ):
         if keyword in question_text and keyword in text:
             bonus += 0.15
-    if any(marker in text for marker in CLAUSE_MARKERS):
+    if _has_clause_marker(text):
         bonus += 0.05
     if is_weak_citation_chunk(chunk):
         bonus -= 0.5

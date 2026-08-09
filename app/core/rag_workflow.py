@@ -398,16 +398,30 @@ class InsurIntellectAgent:
                             include=["distances", "documents", "metadatas", "embeddings"],
                             where=metadata_filter,
                         )
+                        # 对齐到 ids 列表长度，逐项越界保护：collection.query 在
+                        # 个别 Chroma 版本/边界情况下可能返回 documents 为 None 或短 list，
+                        # 旧实现 payload["documents"][0][i] 直接索引会 IndexError 吞掉回退路径。
+                        ids_arr = (payload.get("ids", [[]]) or [[]])
+                        docs_arr = (payload.get("documents", [[]]) or [[]])
+                        metas_arr = (payload.get("metadatas", [[]]) or [[]])
+                        dists_arr = (payload.get("distances", [[]]) or [[]])
+                        ids_inner = ids_arr[0] if ids_arr else []
+                        docs_inner = docs_arr[0] if docs_arr else []
+                        metas_inner = metas_arr[0] if metas_arr else []
+                        dists_inner = dists_arr[0] if dists_arr else []
                         docs: List[Tuple[Document, float]] = []
                         score_map: Dict[str, float] = {}
                         ids: List[str] = []
-                        for i in range(len(payload.get("ids", [[]])[0])):
-                            cid = payload["ids"][0][i]
-                            text = payload["documents"][0][i]
-                            md = payload["metadatas"][0][i]
-                            dist = payload["distances"][0][i]
-                            # 以(1 - 距离)作为相似度近似
-                            score = _normalize_vector_score(1.0 - float(dist))
+                        for i in range(len(ids_inner)):
+                            cid = ids_inner[i]
+                            text = docs_inner[i] if i < len(docs_inner) else ""
+                            md = (metas_inner[i] if i < len(metas_inner) else {}) or {}
+                            dist = dists_inner[i] if i < len(dists_inner) else None
+                            if dist is None:
+                                score = _normalize_vector_score(0.0)
+                            else:
+                                # 以(1 - 距离)作为相似度近似
+                                score = _normalize_vector_score(1.0 - float(dist))
                             d = Document(page_content=text, metadata=md)
                             docs.append((d, score))
                             ids.append(cid)
@@ -572,12 +586,19 @@ class InsurIntellectAgent:
             collection = self.vectorstore._collection  # type: ignore[attr-defined]
             # (FIX-1.2) 获取预存嵌入向量，避免在排序阶段重复计算
             payload = collection.get(ids=chunk_ids, include=["documents", "metadatas", "embeddings"])
+            # 对齐到 ids 长度，逐项越界保护：Chroma 在 chunk_id 被删除或返回子集时
+            # 可能给出 documents=None 或短于 ids 的列表，导致 [i] 越界 IndexError
+            # 进而让整个 abuild_context 进 except 返回空 context（误拒答）。
+            ids_list = payload.get("ids", []) or []
+            docs_list = payload.get("documents", []) or []
+            metas_list = payload.get("metadatas", []) or []
+            embs_list = payload.get("embeddings", []) or []
             out: List[Document] = []
-            for i in range(len(payload.get("ids", []))):
-                text = payload.get("documents", [None])[i]
-                md = payload.get("metadatas", [None])[i] or {}
+            for i in range(len(ids_list)):
+                text = docs_list[i] if i < len(docs_list) else None
+                md = (metas_list[i] if i < len(metas_list) else {}) or {}
                 try:
-                    emb = payload.get("embeddings", [None])[i]
+                    emb = embs_list[i] if i < len(embs_list) else None
                 except Exception:
                     emb = None
                 # (FIX-1.3) 可选：将嵌入向量附加到元数据，供排序使用

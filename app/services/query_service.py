@@ -34,6 +34,26 @@ class QueryService:
         """初始化查询服务,使用InsurIntellectAgent RAG工作流"""
         # 延迟初始化agent,避免在服务启动时就创建
         self._agent = None
+        # 保留对后台 query 历史保存任务的强引用，防 GC 静默回收 task
+        # （裸 asyncio.create_task 未持引用则可能被 GC，Python 官方文档明确警告）
+        self._bg_tasks: set = set()
+
+    def _spawn_bg(self, coro):
+        """启动后台任务并持有强引用；任务结束后自动从集合退出。"""
+        try:
+            task = asyncio.create_task(coro)
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
+            return task
+        except Exception as exc:
+            # create_task 失败（如无 running loop）时手动关闭 coro 防
+            # "coroutine was never awaited" 警告与资源泄漏
+            logger.debug(f"后台任务启动失败：{exc}")
+            try:
+                coro.close()
+            except Exception:
+                pass
+            return None
 
     @property
     def agent(self):
@@ -55,31 +75,6 @@ class QueryService:
             return getattr(self.agent, "embedding_service", None)
         except Exception:
             return None
-
-    # Cover / metadata-only lines that are weak as citations.
-    _WEAK_META_MARKERS = (
-        "文档名称：",
-        "产品名称：",
-        "文档类型：",
-        "生效日期：",
-        "状态：演示样本",
-        "状态：演示",
-    )
-    _CLAUSE_MARKERS = (
-        "等待期",
-        "犹豫期",
-        "责任免除",
-        "免赔",
-        "保险责任",
-        "保险金",
-        "本合同",
-        "投保人",
-        "被保险人",
-        "理赔",
-        "除外",
-        "第",
-        "条",
-    )
 
     def _chunk_text(self, c: Dict[str, Any]) -> str:
         return citation_policy.chunk_text(c)
@@ -316,7 +311,7 @@ class QueryService:
                         except Exception:
                             pass
                         rewriting_metadata_json = json.dumps(meta_payload, ensure_ascii=False)
-                        asyncio.create_task(
+                        self._spawn_bg(
                             self._save_query_history_bg(
                                 question=request.question,
                                 answer=answer_text,
@@ -357,7 +352,7 @@ class QueryService:
                     )
                     # 后台保存，不阻塞
                     try:
-                        asyncio.create_task(
+                        self._spawn_bg(
                             self._save_query_history_bg(
                                 question=request.question,
                                 answer=fallback.answer,
@@ -407,7 +402,8 @@ class QueryService:
                 # 拒答门闩：无检索 / 低分 / 明显离题
                 best_sim = self._best_similarity(retrieved_chunks)
                 off_topic = self._is_off_topic(request.question, retrieved_chunks)
-                if off_topic or (not retrieved_chunks) or best_sim < float(getattr(settings, "SIMILARITY_THRESHOLD", 0.2)):
+                # fallback 对齐 config.py 默认值 0.32，与 README hero "BGE threshold 0.32" 公开承诺一致
+                if off_topic or (not retrieved_chunks) or best_sim < float(getattr(settings, "SIMILARITY_THRESHOLD", 0.32)):
                     response_time = (datetime.utcnow() - start_time).total_seconds()
                     # Public API: no low-score filler citations on refusal
                     response = QueryResponse(
@@ -423,7 +419,7 @@ class QueryService:
                         embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                     )
                     try:
-                        asyncio.create_task(
+                        self._spawn_bg(
                             self._save_query_history_bg(
                                 question=request.question,
                                 answer=response.answer,
@@ -534,7 +530,7 @@ class QueryService:
                     # 后台保存，不阻塞
                     try:
                         rewriting_metadata_json = json.dumps({"route": "RAG", "degraded": True}, ensure_ascii=False)
-                        asyncio.create_task(
+                        self._spawn_bg(
                             self._save_query_history_bg(
                                 question=request.question,
                                 answer=answer_text,
@@ -569,7 +565,7 @@ class QueryService:
                     # 后台保存，不阻塞
                     try:
                         rewriting_metadata_json = json.dumps({"route": "RAG", "degraded": True, "reason": "queue_timeout"}, ensure_ascii=False)
-                        asyncio.create_task(
+                        self._spawn_bg(
                             self._save_query_history_bg(
                                 question=request.question,
                                 answer=answer_text,
@@ -617,7 +613,7 @@ class QueryService:
                     except Exception:
                         pass
                     rewriting_metadata_json = json.dumps(meta_payload, ensure_ascii=False)
-                    asyncio.create_task(
+                    self._spawn_bg(
                         self._save_query_history_bg(
                             question=request.question,
                             answer=answer_text,
@@ -650,7 +646,7 @@ class QueryService:
                     embedding_provider=getattr(getattr(self, "embedding_service", None), "provider", None),
                 )
                 try:
-                    asyncio.create_task(
+                    self._spawn_bg(
                         self._save_query_history_bg(
                             question=request.question,
                             answer=error_response.answer,
@@ -818,7 +814,8 @@ class QueryService:
                 # Refusal gate for SSE path (public chunks empty)
                 best_sim = self._best_similarity(retrieved_chunks)
                 off_topic = self._is_off_topic(request.question, retrieved_chunks)
-                thr = float(getattr(settings, "SIMILARITY_THRESHOLD", 0.2))
+                # fallback 对齐 config.py 默认值 0.32，与 README hero "BGE threshold 0.32" 公开承诺一致
+                thr = float(getattr(settings, "SIMILARITY_THRESHOLD", 0.32))
                 if off_topic or (not retrieved_chunks) or best_sim < thr:
                     refuse_ans = self._refusal_answer("insufficient_evidence")
                     end_evt = {
