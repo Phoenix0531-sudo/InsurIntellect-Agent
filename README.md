@@ -4,7 +4,13 @@
 
 <div align="center">
 
-<!-- Dynamic GitHub badges (repo public). -->
+<img src="docs/screenshots/logo-192.png" width="160" alt="InsurIntellect icon — citation card with evidence chip"/>
+
+**A clause-grounded AI agent for local insurance policy PDFs**
+Not a generic PDF chatbot.
+
+`Clauses are retrieval-grounded` · `Narration is LLM-assisted` · `Every output is citation-tracked or refused`
+
 [![CI](https://img.shields.io/github/actions/workflow/status/Phoenix0531-sudo/InsurIntellect-Agent/ci.yml?branch=master&label=CI)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
@@ -15,23 +21,13 @@
 [![RAG](https://img.shields.io/badge/RAG-clause--grounded-1D9CFF.svg)](#concept-of-clause-grounded-rag)
 [![Not advice](https://img.shields.io/badge/Not%20regulated%20insurance%20advice-critical.svg)](#disclaimer)
 
-<img align="center" src="docs/screenshots/readme_logo.png" width="72%" alt="InsurIntellect combination mark — citation card icon with wordmark"/>
-
-<em>Cited answers from local insurance policy PDFs &mdash; retrieved clauses first, LLM narration second, citations or refusal always.</em>
-
-<table align="center">
-  <tr>
-    <td align="center"><sub><b>Local clause PDFs</b></sub></td>
-    <td align="center"><sub>&rarr;</sub></td>
-    <td align="center"><sub><b>Hybrid retrieval</b><br/>Chroma &middot; BM25 &middot; RRF</sub></td>
-    <td align="center"><sub>&rarr;</sub></td>
-    <td align="center"><sub><b>Evidence gate</b><br/>BGE threshold 0.32</sub></td>
-    <td align="center"><sub>&rarr;</sub></td>
-    <td align="center"><sub><b>Cited answer or refusal</b></sub></td>
-  </tr>
-</table>
+**InsurIntellect** turns a natural-language insurance question into a **cited answer or an honest refusal**: local clause PDFs &rarr; hybrid retrieval &rarr; evidence gate &rarr; grounded narration.
 
 </div>
+
+> Not regulated insurance advice. For demonstration and research only.
+
+---
 
 **InsurIntellect** is an AI agent system tailored for insurance policy and clause PDFs. It builds a local clause corpus, retrieves evidence with vector + BM25 search, and uses an OpenAI-compatible large language model only to narrate answers that can be traced back to document, page, and excerpt.
 

@@ -4,7 +4,13 @@
 
 <div align="center">
 
-<!-- 动态 GitHub 徽章（仓库已公开） -->
+<img src="docs/screenshots/logo-192.png" width="160" alt="InsurIntellect 图标 — 带证据芯片的引用卡片"/>
+
+**面向本地保险条款 PDF 的条款证据型 AI Agent**
+不是通用 PDF 聊天机器人。
+
+`条款是检索证据型` · `叙述是 LLM 辅助型` · `每个输出带引用或诚实拒答`
+
 [![CI](https://img.shields.io/github/actions/workflow/status/Phoenix0531-sudo/InsurIntellect-Agent/ci.yml?branch=master&label=CI)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
@@ -15,23 +21,13 @@
 [![RAG](https://img.shields.io/badge/RAG-clause--grounded-1D9CFF.svg)](#条款证据型-rag-的概念)
 [![Not advice](https://img.shields.io/badge/Not%20regulated%20insurance%20advice-critical.svg)](#免责声明)
 
-<img align="center" src="docs/screenshots/readme_logo.png" width="72%" alt="InsurIntellect 组合标识 — 引用卡片图标 + 字标"/>
-
-<em>面向本地保险条款 PDF 的带引用回答 &mdash; 条款检索优先，LLM 叙述其次，每个输出都带引用或诚实地拒答。</em>
-
-<table align="center">
-  <tr>
-    <td align="center"><sub><b>本地条款 PDF</b></sub></td>
-    <td align="center"><sub>&rarr;</sub></td>
-    <td align="center"><sub><b>混合检索</b><br/>Chroma &middot; BM25 &middot; RRF</sub></td>
-    <td align="center"><sub>&rarr;</sub></td>
-    <td align="center"><sub><b>证据闸门</b><br/>BGE 阈值 0.32</sub></td>
-    <td align="center"><sub>&rarr;</sub></td>
-    <td align="center"><sub><b>带引用回答或拒答</b></sub></td>
-  </tr>
-</table>
+**InsurIntellect** 把一句自然语言的保险问题变成 **带引用回答或诚实拒答**：本地条款 PDF &rarr; 混合检索 &rarr; 证据闸门 &rarr; 有据叙述。
 
 </div>
+
+> 本仓库内容不是受到监管的保险建议，仅供演示与研究使用。
+
+---
 
 **InsurIntellect** 是面向保险条款 / 保单 PDF 的 AI Agent 系统。它构建本地条款语料库，用向量 + BM25 检索定位证据，再由 OpenAI 兼容大语言模型只负责把可追溯证据组织成回答。
 
