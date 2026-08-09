@@ -7,26 +7,29 @@
 <!-- 动态 GitHub 徽章（仓库已公开） -->
 [![CI](https://img.shields.io/github/actions/workflow/status/Phoenix0531-sudo/InsurIntellect-Agent/ci.yml?branch=master&label=CI)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/Phoenix0531-sudo/InsurIntellect-Agent?style=flat)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/stargazers)
-[![Last commit](https://img.shields.io/github/last-commit/Phoenix0531-sudo/InsurIntellect-Agent/master)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/commits/master)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](#快速开始)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 [![Chroma](https://img.shields.io/badge/vector-Chroma-FF6F61.svg)](https://www.trychroma.com/)
 [![BM25](https://img.shields.io/badge/lexical-BM25%2Bjieba-6C63FF.svg)](#架构)
 [![RAG](https://img.shields.io/badge/RAG-clause--grounded-1D9CFF.svg)](#条款证据型-rag-的概念)
-[![Embedding](https://img.shields.io/badge/embed-BGE%20small%20zh-orange.svg)](#提供商说明)
-[![Threshold](https://img.shields.io/badge/SIMILARITY__THRESHOLD-0.32-informational.svg)](#提供商说明)
-[![Port](https://img.shields.io/badge/demo-localhost%3A8766-0ea5e9.svg)](#快速开始)
-[![Mode](https://img.shields.io/badge/SIMPLE__RAG-default-success.svg)](#架构)
-[![UI](https://img.shields.io/badge/UI-static%20HTML%2FCSS%2FJS-lightgrey.svg)](#预览)
 [![Not advice](https://img.shields.io/badge/Not%20regulated%20insurance%20advice-critical.svg)](#免责声明)
-
-![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
 <img align="center" src="docs/screenshots/readme_logo.png" width="72%" alt="InsurIntellect 组合标识 — 引用卡片图标 + 字标"/>
 
-<em>面向保险条款 PDF 的证据型 RAG &mdash; 条款检索优先，LLM 叙述其次，每个输出都带引用或诚实地拒答。</em>
+<em>面向本地保险条款 PDF 的带引用回答 &mdash; 条款检索优先，LLM 叙述其次，每个输出都带引用或诚实地拒答。</em>
+
+<table align="center">
+  <tr>
+    <td align="center"><sub><b>本地条款 PDF</b></sub></td>
+    <td align="center"><sub>&rarr;</sub></td>
+    <td align="center"><sub><b>混合检索</b><br/>Chroma &middot; BM25 &middot; RRF</sub></td>
+    <td align="center"><sub>&rarr;</sub></td>
+    <td align="center"><sub><b>证据闸门</b><br/>BGE 阈值 0.32</sub></td>
+    <td align="center"><sub>&rarr;</sub></td>
+    <td align="center"><sub><b>带引用回答或拒答</b></sub></td>
+  </tr>
+</table>
 
 </div>
 
@@ -65,13 +68,13 @@
 
 ## InsurIntellect 是什么？
 
-InsurIntellect 是一个面向本地保险文档的条款证据型金融 AI Agent。它只聚焦一条可复现流程：
+InsurIntellect 是一个面向本地保险文档的条款证据型 AI Agent。它只聚焦一条可复现流程：
 
 ```text
 本地条款 PDF → 混合检索 → 证据门闩 → 带引用回答或拒答
 ```
 
-项目按作品集审阅方式设计：样例语料公开合成，API 足够小，UI 把证据放在一等位置，CI 不依赖真实 LLM Key。
+项目按作品集审阅方式构建：样例语料保持公开合成，API 保持小而稳定，UI 把证据推到一等位置，CI 不依赖真实 LLM Key。
 
 ## 条款证据型 RAG 的概念
 
@@ -186,12 +189,12 @@ InsurIntellect 的核心设计原则是严格区分 **检索得到的条款证�
 
 <table align="center">
   <tr>
-    <td align="center"><a href="docs/screenshots/preview.png"><img src="docs/screenshots/preview.png" alt="主界面双栏"/></a><br><sub><b>主界面双栏</b></sub></td>
-    <td align="center"><a href="docs/screenshots/citations.png"><img src="docs/screenshots/citations.png" alt="引用卡"/></a><br><sub><b>引用卡</b></sub></td>
+    <td align="center"><a href="docs/screenshots/preview.png"><img src="docs/screenshots/preview.png" width="100%" alt="主界面双栏"/></a><br/><sub><b>主界面双栏</b><br/>语料 &middot; 免责 &middot; 带引用回答</sub></td>
+    <td align="center"><a href="docs/screenshots/citations.png"><img src="docs/screenshots/citations.png" width="100%" alt="引用卡"/></a><br/><sub><b>引用卡</b><br/>文档名 &middot; 页码 &middot; 原文摘录</sub></td>
   </tr>
   <tr>
-    <td align="center"><a href="docs/screenshots/refuse_advice.png"><img src="docs/screenshots/refuse_advice.png" alt="拒答 / 建议边界"/></a><br><sub><b>拒答 / 建议边界</b></sub></td>
-    <td align="center"><a href="docs/screenshots/preview_empty.png"><img src="docs/screenshots/preview_empty.png" alt="冷启动 / 空态"/></a><br><sub><b>冷启动 / 空态</b></sub></td>
+    <td align="center"><a href="docs/screenshots/refuse_advice.png"><img src="docs/screenshots/refuse_advice.png" width="100%" alt="拒答 / 建议边界"/></a><br/><sub><b>拒答 / 建议边界</b><br/>越题 &middot; 购买建议 &rarr; 诚实拒答</sub></td>
+    <td align="center"><a href="docs/screenshots/preview_empty.png"><img src="docs/screenshots/preview_empty.png" width="100%" alt="冷启动 / 空态"/></a><br/><sub><b>冷启动 / 空态</b><br/>语料未入库 &middot; 明确下一步</sub></td>
   </tr>
 </table>
 

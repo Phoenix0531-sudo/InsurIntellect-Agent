@@ -7,26 +7,29 @@
 <!-- Dynamic GitHub badges (repo public). -->
 [![CI](https://img.shields.io/github/actions/workflow/status/Phoenix0531-sudo/InsurIntellect-Agent/ci.yml?branch=master&label=CI)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/Phoenix0531-sudo/InsurIntellect-Agent)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/Phoenix0531-sudo/InsurIntellect-Agent?style=flat)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/stargazers)
-[![Last commit](https://img.shields.io/github/last-commit/Phoenix0531-sudo/InsurIntellect-Agent/master)](https://github.com/Phoenix0531-sudo/InsurIntellect-Agent/commits/master)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](#quickstart)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 [![Chroma](https://img.shields.io/badge/vector-Chroma-FF6F61.svg)](https://www.trychroma.com/)
 [![BM25](https://img.shields.io/badge/lexical-BM25%2Bjieba-6C63FF.svg)](#architecture)
 [![RAG](https://img.shields.io/badge/RAG-clause--grounded-1D9CFF.svg)](#concept-of-clause-grounded-rag)
-[![Embedding](https://img.shields.io/badge/embed-BGE%20small%20zh-orange.svg)](#provider-notes)
-[![Threshold](https://img.shields.io/badge/SIMILARITY__THRESHOLD-0.32-informational.svg)](#provider-notes)
-[![Port](https://img.shields.io/badge/demo-localhost%3A8766-0ea5e9.svg)](#quickstart)
-[![Mode](https://img.shields.io/badge/SIMPLE__RAG-default-success.svg)](#architecture)
-[![UI](https://img.shields.io/badge/UI-static%20HTML%2FCSS%2FJS-lightgrey.svg)](#preview)
 [![Not advice](https://img.shields.io/badge/Not%20regulated%20insurance%20advice-critical.svg)](#disclaimer)
-
-![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Phoenix0531-sudo.InsurIntellect-Agent&left_color=gray&right_color=%231D9CFF)
 
 <img align="center" src="docs/screenshots/readme_logo.png" width="72%" alt="InsurIntellect combination mark — citation card icon with wordmark"/>
 
-<em>Clause-grounded RAG for insurance policy PDFs &mdash; retrieved clauses first, LLM narration second, citations or refusal always.</em>
+<em>Cited answers from local insurance policy PDFs &mdash; retrieved clauses first, LLM narration second, citations or refusal always.</em>
+
+<table align="center">
+  <tr>
+    <td align="center"><sub><b>Local clause PDFs</b></sub></td>
+    <td align="center"><sub>&rarr;</sub></td>
+    <td align="center"><sub><b>Hybrid retrieval</b><br/>Chroma &middot; BM25 &middot; RRF</sub></td>
+    <td align="center"><sub>&rarr;</sub></td>
+    <td align="center"><sub><b>Evidence gate</b><br/>BGE threshold 0.32</sub></td>
+    <td align="center"><sub>&rarr;</sub></td>
+    <td align="center"><sub><b>Cited answer or refusal</b></sub></td>
+  </tr>
+</table>
 
 </div>
 
@@ -65,13 +68,13 @@ This repository keeps the product intentionally compact: a lightweight RAGFlow-s
 
 ## What is InsurIntellect?
 
-InsurIntellect is a clause-grounded financial AI agent for local insurance documents. It focuses on one repeatable workflow:
+InsurIntellect is a clause-grounded AI agent for local insurance documents. It focuses on one repeatable workflow:
 
 ```text
 Local clause PDFs → hybrid retrieval → evidence gate → cited answer or refusal
 ```
 
-The project is designed for portfolio review: the sample corpus is synthetic and public, the API is small, the UI shows evidence as first-class content, and CI can run without a live LLM key.
+The project is built for portfolio review: the sample corpus stays synthetic and public, the API stays small, the UI surfaces evidence as first-class content, and CI runs without a live LLM key.
 
 ## Concept of clause-grounded RAG
 
@@ -186,12 +189,12 @@ This is the insurance-clause analogue of a smart scheduler: it selects between r
 
 <table align="center">
   <tr>
-    <td align="center"><a href="docs/screenshots/preview.png"><img src="docs/screenshots/preview.png" alt="Main two-pane UI"/></a><br><sub><b>Main two-pane UI</b></sub></td>
-    <td align="center"><a href="docs/screenshots/citations.png"><img src="docs/screenshots/citations.png" alt="Citation cards"/></a><br><sub><b>Citation cards</b></sub></td>
+    <td align="center"><a href="docs/screenshots/preview.png"><img src="docs/screenshots/preview.png" width="100%" alt="Main two-pane UI"/></a><br/><sub><b>Main two-pane UI</b><br/>Corpus &middot; disclaimer &middot; cited answer</sub></td>
+    <td align="center"><a href="docs/screenshots/citations.png"><img src="docs/screenshots/citations.png" width="100%" alt="Citation cards"/></a><br/><sub><b>Citation cards</b><br/>Document &middot; page &middot; excerpt evidence</sub></td>
   </tr>
   <tr>
-    <td align="center"><a href="docs/screenshots/refuse_advice.png"><img src="docs/screenshots/refuse_advice.png" alt="Refuse / advice boundary"/></a><br><sub><b>Refuse / advice boundary</b></sub></td>
-    <td align="center"><a href="docs/screenshots/preview_empty.png"><img src="docs/screenshots/preview_empty.png" alt="Empty / cold start"/></a><br><sub><b>Empty / cold start</b></sub></td>
+    <td align="center"><a href="docs/screenshots/refuse_advice.png"><img src="docs/screenshots/refuse_advice.png" width="100%" alt="Refuse / advice boundary"/></a><br/><sub><b>Refuse / advice boundary</b><br/>Off-topic &middot; purchase questions &rarr; honest refusal</sub></td>
+    <td align="center"><a href="docs/screenshots/preview_empty.png"><img src="docs/screenshots/preview_empty.png" width="100%" alt="Empty / cold start"/></a><br/><sub><b>Empty / cold start</b><br/>No corpus indexed &middot; clear next step</sub></td>
   </tr>
 </table>
 
